@@ -1,0 +1,16 @@
+{
+  "defaultSeverity": "error",
+  "extends": ["tslint:recommended"],
+  "rules": {
+    "no-console": false,
+    "quotemark": [true, "single"],
+    "semicolon": [true, "always"],
+    "trailing-comma": [true, { "multiline": "never", "singleline": "never" }]
+  },
+  "linterOptions": {
+    "exclude": [
+      "node_modules/**/*.ts",
+      "dist/**/*.ts"
+    ]
+  }
+}
