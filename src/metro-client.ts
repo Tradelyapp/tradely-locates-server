@@ -22,6 +22,12 @@ export class MetroClient {
         });
     }
 
+    /**
+     * Output of request is an html document - creates the html on disk for debugging purposes
+     * @param responseData
+     * @param filePath
+     * @private
+     */
     private createHTMLContent(responseData: string, filePath: string): void {
         const htmlContent = `
       <html>
