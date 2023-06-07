@@ -1,3 +1,10 @@
+// import { MetroClient } from './metro-client';
+//
+// const metroClient = new MetroClient();
+// metroClient.start().catch((error) => {
+//     console.error('Error starting MetroClient', error);
+// });
+export {};
 // import fs from 'fs';
 // import axios from 'axios';
 // import cheerio from 'cheerio';
@@ -152,3 +159,4 @@
 //
 //
 // performLogin().then(() => console.log('end'));
+//# sourceMappingURL=locates.js.map

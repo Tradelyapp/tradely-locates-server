@@ -1,10 +1,8 @@
 import MetroClient from './metro-client.js';
-
 const metroClient = new MetroClient();
 metroClient.start().catch((error) => {
     console.error('Error starting MetroClient', error);
 });
-
 // import express from 'express';
 // console.log('index:  http-server');
 // // Create an Express app
@@ -31,4 +29,4 @@ metroClient.start().catch((error) => {
 // app.listen(port, () => {
 //     console.log(`Express server listening on port: ${port}`);
 // });
-
+//# sourceMappingURL=index.js.map

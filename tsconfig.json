@@ -1,16 +1,25 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "build",
+    "rootDir": "./",
+    "resolveJsonModule": true,
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "target": "es6",
-    "lib": ["es6", "dom"],
-    "sourceMap": true,
-    "outDir": "./dist",
+    "forceConsistentCasingInFileNames": true,
     "strict": true,
-    "resolveJsonModule": true
-
+    "noImplicitAny": true,
+    "skipLibCheck": true,
+    "sourceMap": true
   },
-  "include": ["../tradely-locates-server/src/**/*"],
-  "exclude": ["node_modules", "**/*.spec.ts"]
+  "include": [
+    "src/**/*",
+    "package.json"
+  ],
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node"
+  }
+
 }
