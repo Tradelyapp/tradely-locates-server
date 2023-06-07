@@ -1,21 +1,41 @@
 import fs from 'fs';
 import axios from 'axios';
-import cheerio from 'cheerio';
 import * as querystring from 'querystring';
 import readline from "readline";
+import { load } from 'cheerio';
+// import got from 'got';
+// import {CookieJar} from 'tough-cookie';
 
 export class MetroClient {
-    private cookies: string[];
+    private cookies: string[]=['has_js=1'];
 
     private authLocation : string = '';
 
-    private readonly email: string =  'annahuix@yahoo.es';
-    private readonly pass: string =  'Ve1oWD9r2ZS6ny';
+    // private readonly email: string =  'annahuix@yahoo.es';
+    // private readonly pass: string =  'Ve1oWD9r2ZS6ny';
+
+    private readonly email: string =  'okoxxx@gmail.com';
+    private readonly pass: string =  '5bLcEQ13YpFj7i';
+
+    // Access metro
+    private formBuildIdAccessMetro: string = '';
+    private formIdAccessMetro: string = '';
+
+    // Login
+    private formBuildIdLogin: string = '';
+    private formIdLogin: string = '';
+
+    // 2FA: mail
+    private formId2FAMail: string ='';
+    private formBuildId2FAMail: string ='';
+
+    // Submit Pin
+    private formBuildIdSubmitPin: string ='';
+    private formIdSubmitPin: string = '';
 
     // User input readline
     private rl;
     constructor() {
-        this.cookies = [];
         this.rl = readline.createInterface({
             input: process.stdin,
             output: process.stdout
@@ -47,24 +67,27 @@ export class MetroClient {
     /**
      * Access metro - get the formId and set has_js cookie
      */
-    private async accessMetro(): Promise<{ formBuildId: string; formId: string }> {
+    private async accessMetro(): Promise<void> {
         try {
             const cookie = 'has_js=1; path=/';
-            const cookieHeader = { Cookie: cookie };
+            const config: any = {
+                headers: {
+                    Cookie: cookie
+                }
+            };
 
-            const response = await axios.get<string>('https://metro.dttw.com/metro/', {
-                headers: cookieHeader,
-            });
-
-            const $ = cheerio.load(response.data);
-            const formBuildId = $('input[name="form_build_id"]').val() as string;
-            const formId = $('input[name="form_id"]').val() as string;
+            const response = await axios.get<string>('https://metro.dttw.com/metro/', config);
 
             this.createHTMLContent(response.data, 'response.html');
 
-            return { formBuildId, formId };
+            if (response.status === 200) {
+                let responseFormIds: { formId: string, formBuildId: string };
+                responseFormIds = this.getFormBuildIdFromResponse(response)
+                this.formBuildIdAccessMetro = responseFormIds.formBuildId;
+                this.formIdAccessMetro = responseFormIds.formId;
+            }
         } catch (error) {
-            console.error('Error accessing Metro:', error);
+            console.error('Error at accessMetro HTTP request: ', error);
             throw error;
         }
     }
@@ -77,15 +100,15 @@ export class MetroClient {
      * @param formBuildId - from first access to metro page - used on all requests
      * @param formId - from first access to metro page - used on all requests
      */
-    private async accessLogin(formBuildId: string, formId: string): Promise<void> {
+    private async accessLogin(): Promise<void> {
         try {
-            let location: string = '';
+            console.log('accessLogin, buildId '+this.formBuildIdAccessMetro+ ' id '+this.formIdAccessMetro);
 
             const loginData = querystring.stringify({
                 name: this.email,
                 pass: this.pass,
-                form_build_id: formBuildId,
-                form_id: formId,
+                form_build_id: this.formBuildIdAccessMetro,
+                form_id: this.formIdAccessMetro,
                 op: 'Log in',
             });
 
@@ -104,23 +127,32 @@ export class MetroClient {
                 },
             });
 
-            if (response.headers['set-cookie']) {
-                this.cookies = response.headers['set-cookie'];
-                console.log('Received cookies:', this.cookies);
-            } else {
-                console.log('No cookies received');
-            }
 
             if (response.status === 302) {
+                // At this step NO FORM ID is generated when there is the need of 2FA
+                // TODO Check if these Id are needed when an existing cookie
+                let responseFormIds: { formId: string, formBuildId: string };
+                responseFormIds = this.getFormBuildIdFromResponse(response)
+                this.formBuildIdLogin = responseFormIds.formBuildId;
+                this.formIdLogin = responseFormIds.formId;
+
+                if (response.headers['set-cookie']) {
+                    this.cookies.push(...response.headers['set-cookie']);
+                    console.log('Received cookies:', this.cookies);
+                } else {
+                    console.log('No cookies received');
+                }
+
                 console.log('Login successful');
                 this.authLocation = response.headers['location'] as string;
                 console.log('Two-factor authentication URL:', this.authLocation);
                 this.createHTMLContent(response.data, 'response.html');
+
             } else {
                 console.log('Login failed');
             }
         } catch (error) {
-            console.error('Error during accessLogin:', error);
+            console.error('Error at accessLogin HTTP Request: ', error);
             throw error;
         }
     }
@@ -132,17 +164,17 @@ export class MetroClient {
      * @param cookies
      * @param formBuildId
      */
-    private async performTwoFactorAuthenticationByMail(url: string, formBuildId: string): Promise<void> {
+    private async performTwoFactorAuthenticationByMail(url: string): Promise<void>
         {
             try {
-                // console.log('inputFormId: ', formId);
+                console.log('Select Mail, buildId '+this.formBuildIdLogin+ ' id '+this.formIdLogin);
                 const postData = {
                     mimeType: 'application/x-www-form-urlencoded',
                     formData: {
                         destination: 'node',
                         authentication_type: 'email',
                         op: 'Submit',
-                        form_build_id: formBuildId,
+                        form_build_id: this.formBuildIdAccessMetro,
                         form_id: 'bpm_two_factor_authentication_form'
                     }
                 };
@@ -157,13 +189,22 @@ export class MetroClient {
                 };
 
                 const response = await axios.post(url, formData, {
-                    headers
+                    headers, maxRedirects:0
                 });
+
+                if (response.status === 200) {
+                    let responseFormIds: { formId: string, formBuildId: string };
+                    responseFormIds = this.getFormBuildIdFromResponse(response)
+                    this.formBuildId2FAMail = responseFormIds.formBuildId;
+                    this.formId2FAMail = responseFormIds.formId;
+                    console.log("HERE THE FORM IDS FOR SUBMIT PIN "+this.formBuildId2FAMail+' '+this.formId2FAMail);
+                }
+
             } catch (error) {
-                console.error('Error making HTTP request:', error);
+                console.error('Error at performTwoFactorAuthenticationByMail HTTP request:', error);
             }
         }
-    }
+
 
     /**
      * Submit the pinCode, location url same as the previous call
@@ -172,45 +213,161 @@ export class MetroClient {
      * @param formBuildId
      * @param pinCode
      */
-    private async submit2FAPinCode(url: string, formBuildId: string, pinCode: string): Promise<boolean> {
-        try {
-            const postData = {
-                mimeType: 'application/x-www-form-urlencoded',
-                formData: {
-                    authentication_code: pinCode,
-                    op: 'Submit',
-                    form_build_id: formBuildId,
-                    form_id: 'bpm_two_factor_authentication_form'
-                }
-            };
+    // private async submit2FAPinCode(url: string, pinCode: string): Promise<boolean> {
+    //     try {
+    //         console.log('Submit pin, buildId '+this.formBuildId2FAMail+ ' id '+this.formId2FAMail);
+    //
+    //         const postData = {
+    //             formData: {
+    //                 authentication_code: pinCode,
+    //                 op: 'Submit',
+    //                 form_build_id: this.formBuildId2FAMail,
+    //                 form_id: 'bpm_two_factor_authentication_form'
+    //             }
+    //         };
+    //
+    //         const formData = querystring.stringify(postData.formData);
+    //
+    //         const headers = {
+    //             'Content-Type': 'application/x-www-form-urlencoded',
+    //             Cookie: this.cookies.join('; '),
+    //             Referer: url,
+    //             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+    //         };
+    //
+    //         // Log the request details
+    //         console.log(`Sending request to: ${url}`);
+    //         console.log(`POST data: ${formData}`);
+    //         console.log(`Headers: `, headers);
+    //
+    //         const response = await axios.post(url, formData, {
+    //             headers, maxRedirects:0
+    //         });
+    //
+    //         this.createHTMLContent(response.data, 'response.html');
+    //
+    //
+    //         if (response.status === 302) {
+    //             const redirectUrl = response.headers['location'];
+    //             // Handle the redirection as needed
+    //             console.log('Redirected to:', redirectUrl);
+    //
+    //             console.log('Pin submitted successfully');
+    //         // Check if new cookies are set and save them
+    //         if (response.headers['set-cookie']) {
+    //             this.cookies.push(...response.headers['set-cookie']);
+    //         }
+    //             return true;
+    //         } else {
+    //
+    //             console.log('Pin submission failed');
+    //             console.log('Cookies', this.cookies);
+    //             console.log('request ',response);
+    //
+    //             return false;
+    //         }
+    //     } catch (error: any) {
+    //         const redirectUrl = error.response.headers['location'];
+    //         // Handle the redirection as needed
+    //         console.log('Redirected to:', redirectUrl);
+    //
+    //         console.error('Error at submit2FAPinCode HTTP request:', error);
+    //         const errorData = {
+    //             message: error.message,
+    //             stack: error.stack,
+    //             response: error.response.data,
+    //         };
+    //
+    //         const jsonData = JSON.stringify(errorData, null, 2);
+    //         const filePath = 'C:/Users/okox/Desktop/error_submitPIN.json';
+    //         fs.writeFileSync(filePath, jsonData);
+    //
+    //         console.log(`Failed call logged as JSON to: ${filePath}`);
+    //         return false;
+    //     }
+    // }
 
-            const formData = querystring.stringify(postData.formData);
+    private async submit2FAPinCode(url: string, pinCode: string): Promise<any> { return  null as any }
 
-            const headers = {
-                'Content-Type': postData.mimeType,
-                Cookie: this.cookies.join('; '), // Set the cookies in the request
-                Referer: url,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
-            };
 
-            const response = await axios.post(url, formData, {
-                headers
-            });
-
-            // Check the response status code
-            this.createHTMLContent(response.data, 'response.html');
-            if (response.status === 302) {
-                console.log('Pin submitted successfully');
-                return true;
-            } else {
-                console.log('Pin submission failed');
-                return false;
-            }
-        } catch (error) {
-            console.error('Error making HTTP request:', error);
-            return false;
-        }
-    }
+// private async submit2FAPinCode(url: string, pinCode: string): Promise<boolean> {
+//     try {
+//         console.log('Submit pin, buildId '+this.formBuildId2FAMail+ ' id '+this.formId2FAMail);
+//
+//         const postData = {
+//             formData: {
+//                 authentication_code: pinCode,
+//                 op: 'Submit',
+//                 form_build_id: this.formBuildId2FAMail,
+//                 form_id: 'bpm_two_factor_authentication_form'
+//             }
+//         };
+//
+//         const formData = querystring.stringify(postData.formData);
+//
+//         const headers = {
+//             'Content-Type': 'application/x-www-form-urlencoded',
+//             Referer: url,
+//             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+//         };
+//
+//         // Log the request details
+//         console.log(`Sending request to: ${url}`);
+//         console.log(`POST data: ${formData}`);
+//         console.log(`Headers: `, headers);
+//
+//         const cookieJar = new CookieJar();
+//         await this.cookies.forEach(cookie => cookieJar.setCookie(cookie, url));
+//
+//         const response = await got.post(url, {
+//             body: formData,
+//             headers,
+//             cookieJar,
+//             followRedirect: false
+//         });
+//
+//         this.createHTMLContent(response.body, 'response.html');
+//
+//         if (response.statusCode === 302) {
+//     const redirectUrl = response.headers['location'];
+//     console.log('Redirected to:', redirectUrl);
+//     console.log('Pin submitted successfully');
+//
+//     // Check if new cookies are set and save them
+//     if (response.headers['set-cookie']) {
+//         this.cookies.push(...response.headers['set-cookie']);
+//     }
+//
+//     return true;
+// } else {
+//     console.log('Pin submission failed');
+//     console.log('Cookies', this.cookies);
+//     console.log('request ', response);
+//
+//     return false;
+// }
+// } catch (error: any) {
+//     console.error('Error at submit2FAPinCode HTTP request:', error);
+//
+//     if (error.response) {
+//         const redirectUrl = error.response.headers['location'];
+//         console.log('Redirected to:', redirectUrl);
+//
+//         const errorData = {
+//             message: error.message,
+//             stack: error.stack,
+//             response: error.response.body,
+//         };
+//
+//         const jsonData = JSON.stringify(errorData, null, 2);
+//         const filePath = 'C:/Users/okox/Desktop/error_submitPIN.json';
+//         fs.writeFileSync(filePath, jsonData);
+//
+//         console.log(`Failed call logged as JSON to: ${filePath}`);
+//     }
+//     return false;
+// }
+// }
 
     private async accessShortsPage(): Promise<any> {
         try {
@@ -241,7 +398,7 @@ export class MetroClient {
 
             return {formBuildId, formToken, formId};
         } catch (error) {
-            console.error('Error fetching form data:', error);
+            console.error('Error at accessShortsPage HTTP request:', error);
             throw error;
         }
     }
@@ -333,17 +490,21 @@ export class MetroClient {
         return this.cookies;
     }
 
+
+
     public async start(): Promise<void> {
             try {
-                const {formBuildId, formId} = await this.accessMetro();
-                await this.accessLogin(formBuildId, formId);
+                console.log('Access Metro');
+                await this.accessMetro();
+                console.log('Access Login')
+                await this.accessLogin();
                 if (this.authLocation !== '') {
                     console.log('WILL TRIGGER 2FA by MAIL');
-                    await this.performTwoFactorAuthenticationByMail(this.authLocation, formBuildId);
+                    await this.performTwoFactorAuthenticationByMail(this.authLocation);
                     this.rl.question('Enter the PIN code sent to your email: ', async (pinCode) => {
                         if (pinCode.length === 6 && /^\d+$/.test(pinCode)) {
                             console.log(`The pin code is: ${pinCode} . Sending it to Metro`);
-                            const identified: boolean  = await this.submit2FAPinCode(this.authLocation, formBuildId, pinCode);
+                            const identified: boolean  = await this.submit2FAPinCode(this.authLocation, pinCode);
                             if( identified) {
                                 console.log('Identified - going to locates page');
                                 await this.accessShortsPage();
@@ -357,5 +518,36 @@ export class MetroClient {
                 console.error('Error performing login:', error);
             }
         }
+
+    /**
+     * Parses the html response and extracts the FormId and FormBuildId
+     * @param response
+     */
+    private getFormBuildIdFromResponse(response: any): {formBuildId: string, formId: string} {
+        const $ = load(response.data);
+        const formBuildIdElement = $('input[name="form_build_id"]');
+        const formIdElement = $('input[name="form_id"]');
+        let formBuildId = '';
+        let formId = '';
+
+        if(formBuildIdElement.length > 0) {
+            const val = formBuildIdElement.val();
+            formBuildId = val ? val.toString() : '';
+        }
+
+        if(formIdElement.length > 0) {
+            const val = formIdElement.val();
+            formId = val ? val.toString() : '';
+        }
+
+        console.log('formBuildId: ', formBuildId);
+        console.log('formId: ', formId);
+
+        return {
+            formBuildId,
+            formId
+        };
+    }
+
 }
 
