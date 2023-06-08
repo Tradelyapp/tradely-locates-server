@@ -1,19 +1,19 @@
 import fs from 'fs';
 import * as querystring from 'querystring';
 import readline from "readline";
-import { load } from 'cheerio';
+import {load} from 'cheerio';
 import got from 'got';
 
 export default class MetroClient {
-    private cookies: string[]=['has_js=1'];
+    private cookies: string[] = ['has_js=1'];
 
-    private authLocation : string = '';
+    private authLocation: string = '';
 
-    // private readonly email: string =  'annahuix@yahoo.es';
-    // private readonly pass: string =  'Ve1oWD9r2ZS6ny';
+    private readonly email: string = 'annahuix@yahoo.es';
+    private readonly pass: string = 'Ve1oWD9r2ZS6ny';
 
-    private readonly email: string =  'okoxxx@gmail.com';
-    private readonly pass: string =  '5bLcEQ13YpFj7i';
+    // private readonly email: string = 'okoxxx@gmail.com';
+    // private readonly pass: string = '5bLcEQ13YpFj7i';
 
     // Access metro
     private formBuildIdAccessMetro: string = '';
@@ -24,15 +24,22 @@ export default class MetroClient {
     private formIdLogin: string = '';
 
     // 2FA: mail
-    private formId2FAMail: string ='';
-    private formBuildId2FAMail: string ='';
+    private formId2FAMail: string = '';
+    private formBuildId2FAMail: string = '';
 
     // Submit Pin
-    private formBuildIdSubmitPin: string ='';
+    private formBuildIdSubmitPin: string = '';
     private formIdSubmitPin: string = '';
 
     // User input readline
     private rl;
+
+    // User logged in indicator
+    private userLoggedIn: boolean = false;
+
+    // Office value used to get shorts
+    private officeValue: string = '';
+
     constructor() {
         this.rl = readline.createInterface({
             input: process.stdin,
@@ -40,53 +47,113 @@ export default class MetroClient {
         });
     }
 
+    public async start(): Promise<boolean> {
+        try {
+            this.loadCookies();
+            console.log('Load cookies: ' + this.cookies);
+            console.log('Access Metro');
+            await this.accessMetroWithTimeout(30000);
+            if (!this.userLoggedIn) {
+                console.log('Access Login')
+                await this.accessLogin();
+                if (this.authLocation !== '') {
+                    console.log('WILL TRIGGER 2FA by MAIL');
+                    await this.performTwoFactorAuthenticationByMail(this.authLocation);
+                    await new Promise((resolve, reject) => {
+                        this.rl.question('Enter the PIN code sent to your email: ', async (pinCode) => {
+                            if (pinCode.length === 6 && /^\d+$/.test(pinCode)) {
+                                const identified: boolean = await this.submit2FAPinCode(this.authLocation, pinCode);
+                                if (identified) {
+                                    console.log('Identified - going to locates page');
+                                    // await this.accessShortsPage();
+                                    resolve(true);
+                                }
+                            } else {
+                                console.log('Invalid PIN code. Please enter a 6-digit numeric code.');
+                                reject(new Error('Invalid PIN code. Please enter a 6-digit numeric code.'));
+                            }
+                        });
+                    });
+                }
+            } else {
+                console.log('Logged in using cookies');
+            }
+            console.log('returning true start')
+            return true;
+        } catch (error) {
+            console.error('Error performing metro login');
+            console.log('returning false start')
+
+            return false;
+        }
+    }
+
+    public async getShort(): Promise<boolean> {
+        try {
+            console.log('Getting shorts');
+            this.officeValue = await this.accessShortsPage();
+            return true;
+        } catch (error) {
+            console.error('Error getting shorts');
+            return false;
+        }
+    }
+
     /**
-     * Output of request is an html document - creates the html on disk for debugging purposes
-     * @param responseData
-     * @param filePath
+     * Timeout accessMetro - Check possible PPro8/network issues
+     * @param timeout
      * @private
      */
-    private createHTMLContent(responseData: string, filePath: string): void {
-        const htmlContent = `
-      <html>
-        <head>
-          <title>Metro Response</title>
-        </head>
-        <body>
-          <pre>${responseData}</pre>
-        </body>
-      </html>
-    `;
+    private async accessMetroWithTimeout(timeout: number): Promise<void> {
+        const accessMetroPromise = this.accessMetro();
 
-        fs.writeFileSync(filePath, htmlContent);
-        console.log(`HTML content written to file: ${filePath}`);
+        const timeoutPromise = new Promise<void>((resolve, reject) => {
+            setTimeout(() => {
+                reject(new Error('Access Metro request timed out - Check that the CubeX is connected and a PPro instance is running'));
+            }, timeout);
+        });
+
+        try {
+            await Promise.race([accessMetroPromise, timeoutPromise]);
+        } catch (error) {
+            console.error('Error at accessMetroWithTimeout:', error);
+            // Handle the error as needed
+        }
     }
-    
+
+
     /**
      * Access metro - get the formId and set has_js cookie
      */
     private async accessMetro(): Promise<void> {
         try {
-            const cookie = 'has_js=1; path=/';
+            // const cookie = 'has_js=1; path=/';
             const config: any = {
                 headers: {
-                    Cookie: cookie
+                    Cookie: this.cookies.join('; '), // Set the cookies in the request
                 }
             };
 
             const response = await got.get('https://metro.dttw.com/metro/', config);
 
-            this.createHTMLContent(response.body, 'response.html');
-
             if (response.statusCode === 200) {
-                let responseFormIds: { formId: string; formBuildId: string };
-                responseFormIds = this.getFormBuildIdFromResponse(response);
-                this.formBuildIdAccessMetro = responseFormIds.formBuildId;
-                this.formIdAccessMetro = responseFormIds.formId;
+                // Check if user logged in
+                if (this.checkIfLoggedIn(response)) {
+                    this.userLoggedIn = true;
+                } else {
+                    this.userLoggedIn = false;
+                    let responseFormIds: { formId: string; formBuildId: string };
+                    responseFormIds = this.getFormBuildIdFromResponse(response);
+                    this.formBuildIdAccessMetro = responseFormIds.formBuildId;
+                    this.formIdAccessMetro = responseFormIds.formId;
+                }
             }
-        } catch (error) {
-            console.error('Error at accessMetro HTTP request: ', error);
-            throw error;
+        } catch (error: any) {
+            // Do not want to print the error timeout, there is already a racecondition with accessMetroWithTimeout
+            if (error.code != 'ETIMEDOUT') {
+                console.error('Error at accessMetro HTTP request: ', error);
+                throw error;
+            }
         }
     }
 
@@ -130,9 +197,10 @@ export default class MetroClient {
                 this.formIdLogin = responseFormIds.formId;
 
                 if (response.headers['set-cookie']) {
+                    console.log('accessLogin Cookies: ', response.headers['set-cookie']);
                     this.cookies.push(...response.headers['set-cookie']);
                 }
-                this.authLocation = !!response?.headers?.location? response?.headers?.location :'';
+                this.authLocation = !!response?.headers?.location ? response?.headers?.location : '';
             } else {
                 console.log('Login failed');
             }
@@ -215,67 +283,69 @@ export default class MetroClient {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
             };
 
-            const response = await fetch(url, {
+            const response = await got.post(url, {
                 method: 'POST',
                 headers,
                 body: formData,
-                redirect: 'manual' // this is to prevent automatic redirection
+                followRedirect: false
             });
 
-            if (response.status === 302) {
-                const setCookie = response.headers.get('set-cookie');
+            if (response.statusCode === 302) {
+                const setCookie = response.headers['set-cookie'];
+                console.log('submit2FAPinCode Cookies: ', setCookie);
                 if (setCookie) {
                     // Set the MetroTrustBrowser Cookie
-                    const newCookies = setCookie.split('; ');
-                    for (const cookie of newCookies) {
+                    this.cookies = []; // Remove the cookie from AccessMetro is a different one now
+                    for (const cookie of setCookie) {
                         if (!this.cookies.includes(cookie)) {
                             this.cookies.push(cookie);
                         }
                     }
                 }
+                this.storeCookies(); // Store the updated cookies to the file
                 return true;
             }
             return false;
-        } catch (error:any) {
+        } catch (error: any) {
             console.error('Error at submit2FAPinCode HTTP request:', error);
             return false;
         }
     }
 
+    /**
+     * Access the short page and gets the office Id
+     * @private
+     */
     private async accessShortsPage(): Promise<any> {
         try {
             const headers = {
                 Cookie: this.cookies.join('; '), // Set the received cookies in the request header
-                Referer: 'https://metro.dttw.com/metro/',
+                Referer: 'https://metro.dttw.com/metro/pay-for-short-requested',
                 'User-Agent':
                     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
             };
 
-            const response = await got.get('https://metro.dttw.com/metro/create-pay-for-short-request', {
+            const response = await got.get('https://metro.dttw.com/metro/pay-for-short-requested', {
                 headers,
             });
 
             const responseData = response.body;
-            const formBuildIdMatch = responseData.match(/name="form_build_id" value="([^"]+)"/);
-            const formBuildId = formBuildIdMatch ? formBuildIdMatch[1] : '';
+            const $ = load(responseData);
+            const officeValueElement = $('select[name="field_enhanced_payforshort_offic_nid"] option').not('[value="All"]');
+            let officeValue: string = '';
 
-            const formTokenMatch = responseData.match(/name="form_token" value="([^"]+)"/);
-            const formToken = formTokenMatch ? formTokenMatch[1] : '';
+            if (officeValueElement.length > 0) {
+                const val = officeValueElement.val();
+                officeValue = val ? val.toString() : '';
+            }
 
-            const formIdMatch = responseData.match(/name="form_id" value="([^"]+)"/);
-            const formId = formIdMatch ? formIdMatch[1] : '';
-            console.log('form_build_id:', formBuildId);
-            console.log('form_token:', formToken);
-            console.log('form_id:', formId);
-
-            return { formBuildId, formToken, formId };
+            console.log('officeValue:', officeValue);
+            return officeValue;
         } catch (error) {
             console.error('Error at accessShortsPage HTTP request:', error);
             throw error;
         }
     }
-
-
 
     private async officeSelection(): Promise<void> {
         try {
@@ -308,11 +378,10 @@ export default class MetroClient {
                 headers
             });
 
+        } catch (error) {
+            console.error('Error making HTTP request:', error);
         }
-            catch(error) {
-                console.error('Error making HTTP request:', error);
-            }
-        }
+    }
 
     private async acceptSelection(): Promise<void> {
         try {
@@ -381,49 +450,28 @@ export default class MetroClient {
         }
     }
 
-    public async start(): Promise<void> {
-            try {
-                console.log('Access Metro');
-                await this.accessMetro();
-                console.log('Access Login')
-                await this.accessLogin();
-                if (this.authLocation !== '') {
-                    console.log('WILL TRIGGER 2FA by MAIL');
-                    await this.performTwoFactorAuthenticationByMail(this.authLocation);
-                    this.rl.question('Enter the PIN code sent to your email: ', async (pinCode) => {
-                        if (pinCode.length === 6 && /^\d+$/.test(pinCode)) {
-                            const identified: boolean  = await this.submit2FAPinCode(this.authLocation, pinCode);
-                            if( identified) {
-                                console.log('Identified - going to locates page');
-                                // await this.accessShortsPage();
-                            }
-                        } else {
-                            console.log('Invalid PIN code. Please enter a 6-digit numeric code.');
-                        }
-                    });
-                }
-            } catch (error) {
-                console.error('Error performing login:', error);
-            }
-        }
+
+    /*************************************************************************************************
+     ********************************************* UTILS *********************************************
+     *************************************************************************************************/
 
     /**
      * Parses the html response and extracts the FormId and FormBuildId
      * @param response
      */
-    private getFormBuildIdFromResponse(response: any): {formBuildId: string, formId: string} {
+    private getFormBuildIdFromResponse(response: any): { formBuildId: string, formId: string } {
         const $ = load(response.body);
         const formBuildIdElement = $('input[name="form_build_id"]');
         const formIdElement = $('input[name="form_id"]');
         let formBuildId = '';
         let formId = '';
 
-        if(formBuildIdElement.length > 0) {
+        if (formBuildIdElement.length > 0) {
             const val = formBuildIdElement.val();
             formBuildId = val ? val.toString() : '';
         }
 
-        if(formIdElement.length > 0) {
+        if (formIdElement.length > 0) {
             const val = formIdElement.val();
             formId = val ? val.toString() : '';
         }
@@ -437,5 +485,73 @@ export default class MetroClient {
         };
     }
 
+    /**
+     * Store cookies in file system
+     * @private
+     */
+    private storeCookies(): void {
+        const cookiesData = JSON.stringify(this.cookies);
+        fs.writeFileSync('cookies.json', cookiesData);
+    }
+
+
+    /**
+     * Load cookies from file system
+     * @private
+     */
+    private loadCookies(): void {
+        try {
+            const cookiesData = fs.readFileSync('cookies.json', 'utf-8');
+            const cookies = JSON.parse(cookiesData);
+            if (Array.isArray(cookies)) {
+                this.cookies = cookies;
+            }
+        } catch (error) {
+            // Ignore error if the file doesn't exist or there's an issue reading it
+        }
+    }
+
+    /**
+     * Check if user is logged in checking on a class in the body
+     * @param response
+     * @private
+     */
+    private checkIfLoggedIn(response: any): boolean {
+        const $ = load(response.body);
+        const bodyClass = $('body').attr('class');
+
+        if (bodyClass && bodyClass.includes('not-logged-in')) {
+            console.log('Not logged in: removing cookies');
+            // It is possible that the cookies are expired, so I will erase them\
+            this.cookies = ['has_js=1'];
+            this.storeCookies();
+            return false;
+        } else {
+            console.log('Logged in');
+            return true;
+        }
+    }
+
+    /**
+     * Output of request is an html document - creates the html on disk for debugging purposes
+     * @param responseData
+     * @param filePath
+     * @private
+     */
+    private createHTMLContent(responseData: string, filePath: string): void {
+        const htmlContent = `
+      <html>
+        <head>
+          <title>Metro Response</title>
+        </head>
+        <body>
+          <pre>${responseData}</pre>
+        </body>
+      </html>
+    `;
+
+        fs.writeFileSync(filePath, htmlContent);
+        console.log(`HTML content written to file: ${filePath}`);
+    }
 }
 

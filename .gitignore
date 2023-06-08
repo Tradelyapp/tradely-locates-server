@@ -130,6 +130,7 @@ dist
 *.launch
 .settings/
 *.sublime-workspace
+*.bak
 
 # IDE - VSCode
 .vscode/*
@@ -149,3 +150,5 @@ dist
 
 
 build/*
+cookies.json
+response.html
