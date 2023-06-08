@@ -9,11 +9,11 @@ export default class MetroClient {
 
     private authLocation: string = '';
 
-    // private readonly email: string =  'annahuix@yahoo.es';
-    // private readonly pass: string =  'Ve1oWD9r2ZS6ny';
+    private readonly email: string = 'annahuix@yahoo.es';
+    private readonly pass: string = 'Ve1oWD9r2ZS6ny';
 
-    private readonly email: string = 'okoxxx@gmail.com';
-    private readonly pass: string = '5bLcEQ13YpFj7i';
+    // private readonly email: string = 'okoxxx@gmail.com';
+    // private readonly pass: string = '5bLcEQ13YpFj7i';
 
     // Access metro
     private formBuildIdAccessMetro: string = '';
@@ -36,6 +36,9 @@ export default class MetroClient {
 
     // User logged in indicator
     private userLoggedIn: boolean = false;
+
+    // Office value used to get shorts
+    private officeValue: string = '';
 
     constructor() {
         this.rl = readline.createInterface({
@@ -85,6 +88,16 @@ export default class MetroClient {
         }
     }
 
+    public async getShort(): Promise<boolean> {
+        try {
+            console.log('Getting shorts');
+            this.officeValue = await this.accessShortsPage();
+            return true;
+        } catch (error) {
+            console.error('Error getting shorts');
+            return false;
+        }
+    }
 
     /**
      * Timeout accessMetro - Check possible PPro8/network issues
@@ -299,33 +312,35 @@ export default class MetroClient {
         }
     }
 
+    /**
+     * Access the short page and gets the office Id
+     * @private
+     */
     private async accessShortsPage(): Promise<any> {
         try {
             const headers = {
                 Cookie: this.cookies.join('; '), // Set the received cookies in the request header
-                Referer: 'https://metro.dttw.com/metro/',
+                Referer: 'https://metro.dttw.com/metro/pay-for-short-requested',
                 'User-Agent':
                     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
             };
 
-            const response = await got.get('https://metro.dttw.com/metro/create-pay-for-short-request', {
+            const response = await got.get('https://metro.dttw.com/metro/pay-for-short-requested', {
                 headers,
             });
 
             const responseData = response.body;
-            const formBuildIdMatch = responseData.match(/name="form_build_id" value="([^"]+)"/);
-            const formBuildId = formBuildIdMatch ? formBuildIdMatch[1] : '';
+            const $ = load(responseData);
+            const officeValueElement = $('select[name="field_enhanced_payforshort_offic_nid"] option').not('[value="All"]');
+            let officeValue: string = '';
 
-            const formTokenMatch = responseData.match(/name="form_token" value="([^"]+)"/);
-            const formToken = formTokenMatch ? formTokenMatch[1] : '';
+            if (officeValueElement.length > 0) {
+                const val = officeValueElement.val();
+                officeValue = val ? val.toString() : '';
+            }
 
-            const formIdMatch = responseData.match(/name="form_id" value="([^"]+)"/);
-            const formId = formIdMatch ? formIdMatch[1] : '';
-            console.log('form_build_id:', formBuildId);
-            console.log('form_token:', formToken);
-            console.log('form_id:', formId);
-
-            return {formBuildId, formToken, formId};
+            console.log('officeValue:', officeValue);
+            return officeValue;
         } catch (error) {
             console.error('Error at accessShortsPage HTTP request:', error);
             throw error;

@@ -1,10 +1,12 @@
 import MetroClient from './metro-client.js';
-import express from "express";
+import HttpServer from "./http-server.js";
 
-const app = express();
-const port: number = 3000;
+/** The aim of this file is to serve as a launcher, it creates the metroClient, launches the httpServer passing the metroClient
+ * reference to make the metro actions
+ */
 
-async function initializeMetroClient() {
+
+async function initializeMetroClient(): Promise<MetroClient> {
     console.log('Starting metroClient');
     const metroClient = new MetroClient();
     const started = await metroClient.start();
@@ -13,43 +15,23 @@ async function initializeMetroClient() {
     } else {
         console.log('Failed to start metroClient');
     }
+    return metroClient;
 }
 
-function startServer(): void {
-    // Middleware to log incoming requests
-    app.use((req, res, next) => {
-        console.log(`Received request: ${req.method} ${req.url}`);
-        next();
-    });
-
-    // Route handler for the main endpoint
-    app.get('/', async (req, res) => {
-        try {
-            res.send('Request handled successfully');
-        } catch (error) {
-            console.error('Error handling request:', error);
-            res.status(500).send('An error occurred');
-        }
-    });
-
-    app.listen(port, () => {
-        console.log(`Express server listening on port: ${port}`);
-    });
-}
-
-function launchServer() {
+function launchServer(metroClient: MetroClient) {
     console.log('Starting server');
-    startServer();
+    const httpServer: HttpServer = new HttpServer(metroClient);
+    httpServer.startServer()
     console.log('Started server');
 }
 
 // Initialize the MetroClient
 initializeMetroClient()
-    .then(() => {
+    .then((metroClient) => {
         // MetroClient initialization completed successfully
         console.log('MetroClient initialization completed successfully');
         // Launch the server
-        launchServer();
+        launchServer(metroClient);
     })
     .catch((error) => {
         // Error occurred during MetroClient initialization

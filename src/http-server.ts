@@ -1,16 +1,44 @@
-import express from 'express';
-
+import express, {Request, Response} from 'express';
+import MetroClient from "./metro-client.js";
 
 export default class HttpServer {
-
     app = express();
+    metroClient: MetroClient;
     private port: number = 3000;
+
+    constructor(metroClient: MetroClient) {
+        this.metroClient = metroClient;
+    }
 
     public startServer(): void {
         // Middleware to log incoming requests
         this.app.use((req, res, next) => {
             console.log(`Received request: ${req.method} ${req.url}`);
             next();
+        });
+
+        // Route handler for the buy endpoint
+        this.app.get('/buy', async (req: Request, res: Response) => {
+            try {
+                console.log('BUY request received');
+                // Parse the ticker and amount parameters
+                const ticker = req.query.ticker as string;
+                const amount = parseInt(req.query.amount as string);
+
+                // Mock the price
+                const price = 100; // replace this with your actual price calculation
+
+                console.log(`Received buy request: ticker = ${ticker}, amount = ${amount}`);
+
+                console.log('Calling MetroClient - getShort');
+                await this.metroClient.getShort();
+
+                // Send the price in the response
+                res.json({price});
+            } catch (error) {
+                console.error('Error handling buy request:', error);
+                res.status(500).send('An error occurred');
+            }
         });
 
         // Route handler for the main endpoint
@@ -26,11 +54,5 @@ export default class HttpServer {
         this.app.listen(this.port, () => {
             console.log(`Express server listening on port: ${this.port}`);
         });
-
     }
 }
-
-
-
-
-
