@@ -1,0 +1,7 @@
+build
+e2e
+node_modules
+dist
+src/@fuse
+src/app/mock-api
+src/app/layout
