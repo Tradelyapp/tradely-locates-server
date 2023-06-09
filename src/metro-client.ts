@@ -5,6 +5,8 @@ import {load} from 'cheerio';
 import got from 'got';
 
 export default class MetroClient {
+    private metroUserId: string = '79125005';
+
     private cookies: string[] = ['has_js=1'];
 
     private authLocation: string = '';
@@ -18,27 +20,36 @@ export default class MetroClient {
     // Access metro
     private formBuildIdAccessMetro: string = '';
     private formIdAccessMetro: string = '';
-
     // Login
     private formBuildIdLogin: string = '';
     private formIdLogin: string = '';
-
     // 2FA: mail
     private formId2FAMail: string = '';
     private formBuildId2FAMail: string = '';
+    // Create short request #1
+    private formBuildIdShortRequest: string = '';
+    private formIdShortRequest: string = '';
+    private formTokenShortRequest: string = '';
+    // Create short request #2 - Submit office
+    private formBuildIdShortOfficeRequest: string = '';
+    private formIdShortOfficeRequest: string = '';
+    private formTokenShortOfficeRequest: string = '';
+    // Create short request #3 - Submit ticker and quantity
+    private formBuildIdShortTickerRequest: string = '';
+    private formIdShortTickerRequest: string = '';
+    private formTokenShortTickerRequest: string = '';
+    private acceptValueShortTickerRequest: string = '';
+    private quoteSourceShortTickerRequest: string = '';
+    private quoteSourceShortTickerValueRequest: string = '';
 
-    // Submit Pin
-    private formBuildIdSubmitPin: string = '';
-    private formIdSubmitPin: string = '';
 
     // User input readline
     private rl;
-
     // User logged in indicator
     private userLoggedIn: boolean = false;
-
     // Office value used to get shorts
-    private officeValue: string = '';
+    private officeValue: string = '78272187';
+    private users: { metro: string, metroForm: string }[] = [];
 
     constructor() {
         this.rl = readline.createInterface({
@@ -88,14 +99,21 @@ export default class MetroClient {
         }
     }
 
-    public async getShort(): Promise<boolean> {
+    public async getShortPrice(trader: string, symbol: string, quantity: string): Promise<string> {
         try {
-            console.log('Getting shorts');
+            console.log(`Getting shorts for ${trader}: ${symbol} ${quantity} shares`);
             this.officeValue = await this.accessShortsPage();
-            return true;
+            // TODO: Initialize step
+            // await this.accessTradersPage();
+            console.log('getIdsForShortRequest');
+            await this.getIdsForShortRequest();
+            console.log('createShortRequestWithOffice');
+            await this.createShortRequestWithOffice();
+            console.log('createTickerShortRequest');
+            return await this.createTickerShortRequest(trader, symbol, quantity);
         } catch (error) {
             console.error('Error getting shorts');
-            return false;
+            return '';
         }
     }
 
@@ -127,7 +145,6 @@ export default class MetroClient {
      */
     private async accessMetro(): Promise<void> {
         try {
-            // const cookie = 'has_js=1; path=/';
             const config: any = {
                 headers: {
                     Cookie: this.cookies.join('; '), // Set the cookies in the request
@@ -143,7 +160,7 @@ export default class MetroClient {
                 } else {
                     this.userLoggedIn = false;
                     let responseFormIds: { formId: string; formBuildId: string };
-                    responseFormIds = this.getFormBuildIdFromResponse(response);
+                    responseFormIds = this.extractFormBuildIdFromResponse(response);
                     this.formBuildIdAccessMetro = responseFormIds.formBuildId;
                     this.formIdAccessMetro = responseFormIds.formId;
                 }
@@ -192,7 +209,7 @@ export default class MetroClient {
             if (response.statusCode === 302) {
                 // At this step NO FORM ID is generated when there is the need of 2FA
                 let responseFormIds: { formId: string; formBuildId: string };
-                responseFormIds = this.getFormBuildIdFromResponse(response);
+                responseFormIds = this.extractFormBuildIdFromResponse(response);
                 this.formBuildIdLogin = responseFormIds.formBuildId;
                 this.formIdLogin = responseFormIds.formId;
 
@@ -247,7 +264,7 @@ export default class MetroClient {
 
             if (response.statusCode === 200) {
                 let responseFormIds: { formId: string; formBuildId: string };
-                responseFormIds = this.getFormBuildIdFromResponse(response);
+                responseFormIds = this.extractFormBuildIdFromResponse(response);
                 this.formBuildId2FAMail = responseFormIds.formBuildId;
                 this.formId2FAMail = responseFormIds.formId;
             }
@@ -347,19 +364,81 @@ export default class MetroClient {
         }
     }
 
-    private async officeSelection(): Promise<void> {
+    private async accessTradersPage(): Promise<any> {
+        try {
+            const headers = {
+                Cookie: this.cookies.join('; '), // Set the received cookies in the request header
+                Referer: 'https://metro.dttw.com/metro/pay-for-short-requested',
+                'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+            };
+
+            const response = await got.get('https://metro.dttw.com/metro/create-pay-for-short-request\n', {
+                headers,
+            });
+
+            const responseData = response.body;
+            const $ = load(responseData);
+            const officeValueElement = $('select[name="field_enhanced_payforshort_offic_nid"] option').not('[value="All"]');
+            let officeValue: string = '';
+
+            if (officeValueElement.length > 0) {
+                const val = officeValueElement.val();
+                officeValue = val ? val.toString() : '';
+            }
+
+            console.log('officeValue:', officeValue);
+            return officeValue;
+        } catch (error) {
+            console.error('Error at accessShortsPage HTTP request:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * #1 call for the short request process
+     * Gets the short request form id's
+     * @private
+     */
+    private async getIdsForShortRequest(): Promise<void> {
+        try {
+            const config: any = {
+                headers: {
+                    Cookie: this.cookies.join('; '), // Set the cookies in the request
+                }
+            };
+
+            const response = await got.get('https://metro.dttw.com/metro/create-pay-for-short-request', config);
+
+            if (response.statusCode === 200) {
+                // Get the form id's for to submit of the createRequestWithOfficeId
+                let responseFormIds: { formId: string; formBuildId: string };
+                responseFormIds = this.extractFormBuildIdFromResponse(response);
+                this.formBuildIdShortRequest = responseFormIds.formBuildId;
+                this.formIdShortRequest = responseFormIds.formId;
+                this.formTokenShortRequest = this.extractFormTokenFromResponse(response);
+            }
+
+        } catch (error) {
+            console.error('Error making HTTP request:', error);
+        }
+    }
+
+    /**
+     * #2 call for the short request process
+     * Submits the office id, the aim is to get a form ids for the shorts request
+     * @private
+     */
+    private async createShortRequestWithOffice(): Promise<void> {
         try {
 
             const postData = {
                 mimeType: 'application/x-www-form-urlencoded',
                 formData: {
-                    office_dropdown: '78272187',
-                    'trader[]': '79125005',
-                    'symbol[]': 'TSLA.NQ',
-                    'num_of_shares[]': '100',
-                    op: 'Submit',
-                    form_build_id: 'form-nr2HyBrpwc8Z3Uc7wJVBfWBzX49XxNJrCcfSUSxFWWg',
-                    form_token: '-qZNk9WN3HfwYthxAfvClcs3lkGVelcnl9wKKi6UnGQ',
+                    office_dropdown: this.officeValue,
+                    op: 'Apply',
+                    form_build_id: this.formBuildIdShortRequest,
+                    form_token: this.formIdShortRequest,
                     form_id: 'bpm_pay_for_short_request_form'
                 }
             };
@@ -378,8 +457,78 @@ export default class MetroClient {
                 headers
             });
 
+            if (response.statusCode === 200) {
+                // Get the form id's for to submit of the createRequestWithOfficeId
+                let responseFormIds: { formId: string; formBuildId: string };
+                responseFormIds = this.extractFormBuildIdFromResponse(response);
+                this.formBuildIdShortOfficeRequest = responseFormIds.formBuildId;
+                this.formIdShortOfficeRequest = responseFormIds.formId;
+                this.formTokenShortOfficeRequest = this.extractFormTokenFromResponse(response);
+            }
         } catch (error) {
             console.error('Error making HTTP request:', error);
+        }
+    }
+
+    /**
+     * #3 call for the short request process
+     * Submits the ticker and number of shares
+     * Sets ids (formId, formBuilderId, formToken, acceptValue and quoteSource)
+     * @private
+     */
+    private async createTickerShortRequest(trader: string, ticker: string, quantity: string): Promise<string> {
+        try {
+            console.log('HELLO1');
+
+            const postData = {
+                'office_dropdown': this.officeValue,
+                'trader[]': [this.metroUserId],
+                'symbol[]': [ticker],
+                'num_of_shares[]': [quantity],
+                'op': 'Submit',
+                'form_build_id': this.formBuildIdShortRequest,
+                'form_token': this.formTokenShortRequest,
+                'form_id': this.formIdShortRequest
+            };
+
+            const formData = querystring.stringify(postData);
+
+            const headers = {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                Cookie: this.cookies.join('; '),
+                Referer: 'https://metro.dttw.com/metro/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+            };
+
+            const response = await got.post('https://metro.dttw.com/metro/create-pay-for-short-request', {
+                body: formData,
+                headers
+            });
+
+            if (response.statusCode === 200) {
+                console.log('HELLO2');
+                console.log(response);
+                // Get the form id's for submitting the createRequestWithOfficeId
+                let responseFormIds: { formId: string; formBuildId: string };
+                responseFormIds = this.extractFormBuildIdFromResponse(response);
+                this.formBuildIdShortTickerRequest = responseFormIds.formBuildId;
+                this.formIdShortTickerRequest = responseFormIds.formId;
+                this.formTokenShortTickerRequest = this.extractFormTokenFromResponse(response);
+                const responseAcceptAndQuoteSource: {
+                    accept: string;
+                    quoteSource: string,
+                    quoteSourceValue: string
+                } = this.extractAcceptAndQuoteSource(response);
+                this.acceptValueShortTickerRequest = responseAcceptAndQuoteSource.accept;
+                this.quoteSourceShortTickerRequest = responseAcceptAndQuoteSource.quoteSource;
+                this.quoteSourceShortTickerValueRequest = responseAcceptAndQuoteSource.quoteSourceValue;
+                const totalCost: string = this.extractTotalCost(response);
+                return totalCost;
+            }
+            return '';
+        } catch (error) {
+            console.error('Error making HTTP request:', error);
+            return '';
         }
     }
 
@@ -389,7 +538,7 @@ export default class MetroClient {
                 mimeType: 'application/x-www-form-urlencoded',
                 formData: {
                     accept: '1',
-                    quote_source: 'Short Pool',
+                    quote_source: this.quoteSourceShortTickerRequest,
                     op: 'Submit',
                     form_build_id: 'form-xNTppYa87B759potJn9U-kJQhrn7VwHYuoKW_g1_6bc',
                     form_token: '-qZNk9WN3HfwYthxAfvClcs3lkGVelcnl9wKKi6UnGQ',
@@ -459,7 +608,7 @@ export default class MetroClient {
      * Parses the html response and extracts the FormId and FormBuildId
      * @param response
      */
-    private getFormBuildIdFromResponse(response: any): { formBuildId: string, formId: string } {
+    private extractFormBuildIdFromResponse(response: any): { formBuildId: string, formId: string } {
         const $ = load(response.body);
         const formBuildIdElement = $('input[name="form_build_id"]');
         const formIdElement = $('input[name="form_id"]');
@@ -483,6 +632,76 @@ export default class MetroClient {
             formBuildId,
             formId
         };
+    }
+
+    /**
+     * Extract the form_token of a response
+     * @param response
+     * @private
+     */
+    private extractFormTokenFromResponse(response: any): string {
+        const $ = load(response.body);
+        const formTokenElement = $('input[name="form_token"]');
+        let formToken = '';
+
+        if (formTokenElement.length > 0) {
+            const val = formTokenElement.val();
+            formToken = val ? val.toString() : '';
+        }
+        return formToken
+    }
+
+    /**
+     * Extract the accept and qoute_source values for the accept shorts request
+     * @param response
+     * @private
+     */
+    private extractAcceptAndQuoteSource(response: any): {
+        accept: string,
+        quoteSource: string,
+        quoteSourceValue: string
+    } {
+        const $ = load(response.body);
+
+        let acceptValue = '';
+        let quoteSource = '';
+        let quoteSourceValue = '';
+
+        $('input[name^="quote_source["]').each(function (i, elem) {
+            let name = $(elem).attr('name');
+            if (name) { // Guard clause
+                quoteSource = name.split('[')[1].split(']')[0];
+                quoteSourceValue = $(elem).attr('value') || '';
+            }
+        });
+
+        $('select[name^="accept["]').each(function (i, elem) {
+            let name = $(elem).attr('name');
+            if (name) { // Guard clause
+                acceptValue = name.split('[')[1].split(']')[0];
+            }
+        });
+
+        console.log('accept Id:', acceptValue);
+        console.log('quoteSource Id:', quoteSource);
+        console.log('quoteSource Value:', quoteSourceValue);
+
+        return {accept: acceptValue, quoteSource: quoteSource, quoteSourceValue: quoteSourceValue};
+    }
+
+    /**
+     * Extract the total cost (7 row in table)
+     * @param response
+     * @private
+     */
+    private extractTotalCost(response: any): string {
+        let totalCost = '';
+        const $ = load(response.body);
+        $('table.sticky-enabled tbody tr').each(function (i, elem) {
+            totalCost = $(this).find('td').eq(6).text(); // index is 0-based
+        });
+        console.log('Total Cost:', totalCost);
+        return totalCost;
     }
 
     /**
@@ -533,6 +752,30 @@ export default class MetroClient {
     }
 
     /**
+     * Extract the user and its id from form
+     */
+    private extractUsersIds(response: any): { traders: { metro: string, metroForm: string }[] } {
+        let users: { metro: string, metroForm: string }[] = [];
+        const $ = load(response.body);
+
+        $('select[name="office_dropdown"] option[value!="_none"]').each((index, element) => {
+            const metro = $(element).text().split(' - ')[0];
+
+            const val = $(element).val();
+            const metroForm = val ? val.toString() : '';
+
+            users.push({metro, metroForm});
+        });
+
+        const jsonData = {
+            "traders": users
+        };
+
+        console.log(jsonData);
+        return jsonData;
+    }
+
+    /**
      * Output of request is an html document - creates the html on disk for debugging purposes
      * @param responseData
      * @param filePath
@@ -552,6 +795,15 @@ export default class MetroClient {
 
         fs.writeFileSync(filePath, htmlContent);
         console.log(`HTML content written to file: ${filePath}`);
+    }
+
+    /**
+     * Initialize office config
+     */
+    private async initializeOfficeConfig(): Promise<boolean> {
+        this.officeValue = await this.accessShortsPage();
+        this.users = await this.accessTradersPage();
+        return true;
     }
 }
 
