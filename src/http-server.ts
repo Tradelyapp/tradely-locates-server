@@ -22,16 +22,14 @@ export default class HttpServer {
             try {
                 console.log('BUY request received');
                 // Parse the ticker and amount parameters
-                const ticker = req.query.ticker as string;
-                const amount = parseInt(req.query.amount as string);
-
-                // Mock the price
-                const price = 100; // replace this with your actual price calculation
+                const trader: string = req.query.trader as string;
+                const ticker: string = req.query.ticker as string;
+                const amount: string = req.query.amount as string;
 
                 console.log(`Received buy request: ticker = ${ticker}, amount = ${amount}`);
 
                 console.log('Calling MetroClient - getShort');
-                await this.metroClient.getShort();
+                const price = await this.metroClient.getShortPrice(trader, ticker, amount);
 
                 // Send the price in the response
                 res.json({price});
