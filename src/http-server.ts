@@ -39,6 +39,30 @@ export default class HttpServer {
             }
         });
 
+        // Route handler for restart connection endpoint
+        this.app.get('/restart', async (req: Request, res: Response) => {
+            try {
+                console.log('Restart request received');
+
+                res.json(await this.metroClient.restartConnection());
+            } catch (error) {
+                console.error('Error handling buy request:', error);
+                res.status(500).send('An error occurred');
+            }
+        });
+
+        // Route handler for the server status endpoint
+        this.app.get('/server', async (req: Request, res: Response) => {
+            try {
+                console.log('Server status request received');
+                res.json(await this.metroClient.getServerStatus());
+            } catch (error) {
+                console.error('Error handling buy request:', error);
+                res.status(500).send('An error occurred');
+            }
+        });
+
+
         // Route handler for the main endpoint
         this.app.get('/', async (req, res) => {
             try {

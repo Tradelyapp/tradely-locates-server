@@ -63,44 +63,47 @@ export default class MetroClient {
             this.loadCookies();
             console.log('Load cookies: ' + this.cookies);
             console.log('Access Metro');
-            await this.accessMetroWithTimeout(30000);
-            if (!this.userLoggedIn) {
-                console.log('Access Login')
-                await this.accessLogin();
-                if (this.authLocation !== '') {
-                    console.log('WILL TRIGGER 2FA by MAIL');
-                    await this.performTwoFactorAuthenticationByMail(this.authLocation);
-                    await new Promise((resolve, reject) => {
-                        this.rl.question('Enter the PIN code sent to your email: ', async (pinCode) => {
-                            if (pinCode.length === 6 && /^\d+$/.test(pinCode)) {
-                                const identified: boolean = await this.submit2FAPinCode(this.authLocation, pinCode);
-                                if (identified) {
-                                    console.log('Identified - going to locates page');
-                                    // await this.accessShortsPage();
-                                    resolve(true);
-                                }
-                            } else {
-                                console.log('Invalid PIN code. Please enter a 6-digit numeric code.');
-                                reject(new Error('Invalid PIN code. Please enter a 6-digit numeric code.'));
-                            }
-                        });
-                    });
-                }
-            } else {
-                console.log('Logged in using cookies');
+            try {
+                await this.accessMetroWithTimeout(30000);
+            } catch (error) {
+                console.error('Error accessing Metro:', error);
+                return false; // Return false to indicate failure
             }
-            console.log('returning true start')
-            return true;
-        } catch (error) {
-            console.error('Error performing metro login');
-            console.log('returning false start')
 
-            return false;
+            if (this.userLoggedIn) {
+                console.log('Logged in using cookies');
+                console.log('returning true start');
+                return true; // Return true to indicate success
+            }
+
+            console.log('Access Login');
+            await this.accessLogin();
+
+            if (this.authLocation !== '') {
+                console.log('WILL TRIGGER 2FA by MAIL');
+                await this.performTwoFactorAuthenticationByMail(this.authLocation);
+                const pinCode = await this.promptForPinCode();
+                const identified = await this.submit2FAPinCode(this.authLocation, pinCode);
+                if (identified) {
+                    console.log('Identified - going to locates page');
+                    // await this.accessShortsPage();
+                    console.log('returning true start');
+                    return true; // Return true to indicate success
+                }
+            }
+
+            console.log('returning false start');
+            return false; // Return false to indicate failure
+        } catch (error) {
+            console.error('Error performing metro login:', error);
+            console.log('returning false start');
+            return false; // Return false to indicate failure
         }
     }
 
     public async getShortPrice(trader: string, symbol: string, quantity: string): Promise<string> {
         try {
+            return '2.37';
             console.log(`Getting shorts for ${trader}: ${symbol} ${quantity} shares`);
             this.officeValue = await this.accessShortsPage();
             // TODO: Initialize step
@@ -115,6 +118,44 @@ export default class MetroClient {
             console.error('Error getting shorts');
             return '';
         }
+    }
+
+    public async restartConnection(): Promise<boolean> {
+        try {
+            return true;
+        } catch (error) {
+            console.error('Error restarting connection');
+            return false;
+        }
+    }
+
+    public async getServerStatus(): Promise<any> {
+        try {
+            let serverStatus: any = {};
+            serverStatus.status = 'ok';
+            serverStatus.message = 'Server is running';
+            serverStatus.cookies = this.cookies;
+            serverStatus.userLoggedIn = this.userLoggedIn;
+            serverStatus.officeValue = this.officeValue;
+            serverStatus.users = this.users
+            return serverStatus;
+        } catch (error) {
+            console.error('Error getting server status');
+            return {};
+        }
+    }
+
+    private async promptForPinCode(): Promise<string> {
+        return new Promise((resolve, reject) => {
+            this.rl.question('Enter the PIN code sent to your email: ', (pinCode) => {
+                if (pinCode.length === 6 && /^\d+$/.test(pinCode)) {
+                    resolve(pinCode);
+                } else {
+                    console.log('Invalid PIN code. Please enter a 6-digit numeric code.');
+                    reject(new Error('Invalid PIN code. Please enter a 6-digit numeric code.'));
+                }
+            });
+        });
     }
 
     /**
@@ -135,6 +176,7 @@ export default class MetroClient {
             await Promise.race([accessMetroPromise, timeoutPromise]);
         } catch (error) {
             console.error('Error at accessMetroWithTimeout:', error);
+            throw error;
             // Handle the error as needed
         }
     }
