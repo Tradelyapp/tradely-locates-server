@@ -151,4 +151,4 @@ dist
 
 build/*
 cookies.json
-response.html
+htmlErrorPages/*

@@ -103,10 +103,11 @@ export default class MetroClient {
 
     public async getShortPrice(trader: string, symbol: string, quantity: string): Promise<string> {
         try {
-            return '2.37';
+            // return '2.37';
             console.log(`Getting shorts for ${trader}: ${symbol} ${quantity} shares`);
             this.officeValue = await this.accessShortsPage();
             // TODO: Initialize step
+            // console.log('accessTradersPage');
             // await this.accessTradersPage();
             console.log('getIdsForShortRequest');
             await this.getIdsForShortRequest();
@@ -210,6 +211,7 @@ export default class MetroClient {
         } catch (error: any) {
             // Do not want to print the error timeout, there is already a racecondition with accessMetroWithTimeout
             if (error.code != 'ETIMEDOUT') {
+                this.createHTMLContent(error, 'accessMetro.html')
                 console.error('Error at accessMetro HTTP request: ', error);
                 throw error;
             }
@@ -264,6 +266,7 @@ export default class MetroClient {
                 console.log('Login failed');
             }
         } catch (error) {
+            this.createHTMLContent(error, 'accessLogin.html')
             console.error('Error at accessLogin HTTP Request: ', error);
             throw error;
         }
@@ -311,6 +314,7 @@ export default class MetroClient {
                 this.formId2FAMail = responseFormIds.formId;
             }
         } catch (error) {
+            this.createHTMLContent(error, 'performTwoFactorAuthenticationByMail.html')
             console.error('Error at performTwoFactorAuthenticationByMail HTTP request:', error);
         }
     }
@@ -366,6 +370,7 @@ export default class MetroClient {
             }
             return false;
         } catch (error: any) {
+            this.createHTMLContent(error, 'submit2FAPinCode.html')
             console.error('Error at submit2FAPinCode HTTP request:', error);
             return false;
         }
@@ -388,6 +393,8 @@ export default class MetroClient {
                 headers,
             });
 
+            this.extractErrorOrWarningMessage(response);
+
             const responseData = response.body;
             const $ = load(responseData);
             const officeValueElement = $('select[name="field_enhanced_payforshort_offic_nid"] option').not('[value="All"]');
@@ -401,6 +408,7 @@ export default class MetroClient {
             console.log('officeValue:', officeValue);
             return officeValue;
         } catch (error) {
+            this.createHTMLContent(error, 'accessShortsPage.html')
             console.error('Error at accessShortsPage HTTP request:', error);
             throw error;
         }
@@ -424,6 +432,8 @@ export default class MetroClient {
             const officeValueElement = $('select[name="field_enhanced_payforshort_offic_nid"] option').not('[value="All"]');
             let officeValue: string = '';
 
+            this.extractErrorOrWarningMessage(response);
+
             if (officeValueElement.length > 0) {
                 const val = officeValueElement.val();
                 officeValue = val ? val.toString() : '';
@@ -432,7 +442,8 @@ export default class MetroClient {
             console.log('officeValue:', officeValue);
             return officeValue;
         } catch (error) {
-            console.error('Error at accessShortsPage HTTP request:', error);
+            this.createHTMLContent(error, 'accessTradersPage.html')
+            console.error('Error at accessTradersPage HTTP request:', error);
             throw error;
         }
     }
@@ -452,6 +463,8 @@ export default class MetroClient {
 
             const response = await got.get('https://metro.dttw.com/metro/create-pay-for-short-request', config);
 
+            this.extractErrorOrWarningMessage(response);
+
             if (response.statusCode === 200) {
                 // Get the form id's for to submit of the createRequestWithOfficeId
                 let responseFormIds: { formId: string; formBuildId: string };
@@ -460,9 +473,10 @@ export default class MetroClient {
                 this.formIdShortRequest = responseFormIds.formId;
                 this.formTokenShortRequest = this.extractFormTokenFromResponse(response);
             }
-
         } catch (error) {
-            console.error('Error making HTTP request:', error);
+            console.error('Error at getIdsForShortRequest HTTP request:', error);
+            this.createHTMLContent(error, 'getIdsForShortRequest.html');
+            throw error;
         }
     }
 
@@ -499,6 +513,8 @@ export default class MetroClient {
                 headers
             });
 
+            this.extractErrorOrWarningMessage(response);
+
             if (response.statusCode === 200) {
                 // Get the form id's for to submit of the createRequestWithOfficeId
                 let responseFormIds: { formId: string; formBuildId: string };
@@ -508,7 +524,9 @@ export default class MetroClient {
                 this.formTokenShortOfficeRequest = this.extractFormTokenFromResponse(response);
             }
         } catch (error) {
-            console.error('Error making HTTP request:', error);
+            this.createHTMLContent(error, 'createShortRequestWithOffice.html')
+            console.error('Error at createShortRequestWithOffice HTTP request:', error);
+            throw error;
         }
     }
 
@@ -547,6 +565,8 @@ export default class MetroClient {
                 headers
             });
 
+            this.extractErrorOrWarningMessage(response);
+
             if (response.statusCode === 200) {
                 console.log('HELLO2');
                 console.log(response);
@@ -569,8 +589,9 @@ export default class MetroClient {
             }
             return '';
         } catch (error) {
-            console.error('Error making HTTP request:', error);
-            return '';
+            this.createHTMLContent(error, 'createTickerShortRequest.html')
+            console.error('Error at createTickerShortRequest HTTP request:', error);
+            throw error;
         }
     }
 
@@ -604,7 +625,9 @@ export default class MetroClient {
 
             // Handle the response as needed
         } catch (error) {
-            console.error('Error making HTTP request:', error);
+            this.createHTMLContent(error, 'acceptSelection.html')
+            console.error('Error at acceptSelection HTTP request:', error);
+            throw error;
         }
     }
 
@@ -637,7 +660,9 @@ export default class MetroClient {
 
             // Handle the response as needed
         } catch (error) {
-            console.error('Error making HTTP request:', error);
+            this.createHTMLContent(error, 'confirmSelection.html')
+            console.error('Error at confirmSelection HTTP request:', error);
+            throw error;
         }
     }
 
@@ -820,23 +845,21 @@ export default class MetroClient {
     /**
      * Output of request is an html document - creates the html on disk for debugging purposes
      * @param responseData
-     * @param filePath
+     * @param fileName
      * @private
      */
-    private createHTMLContent(responseData: string, filePath: string): void {
-        const htmlContent = `
-      <html>
-        <head>
-          <title>Metro Response</title>
-        </head>
-        <body>
-          <pre>${responseData}</pre>
-        </body>
-      </html>
-    `;
+    private createHTMLContent(responseData: any, fileName: string): void {
+        const directory = './htmlErrorPages';
+        const filePath: string = directory + '/' + fileName;
 
-        fs.writeFileSync(filePath, htmlContent);
+        if (!fs.existsSync(directory)) {
+            fs.mkdirSync(directory);
+        }
+
         console.log(`HTML content written to file: ${filePath}`);
+        fs.writeFileSync(filePath, responseData.response.body);
+        console.log('createHTMLContent calling > extractErrorOrWarningMessage');
+        this.extractErrorOrWarningMessage(responseData.response);
     }
 
     /**
@@ -846,6 +869,32 @@ export default class MetroClient {
         this.officeValue = await this.accessShortsPage();
         this.users = await this.accessTradersPage();
         return true;
+    }
+
+    private extractErrorOrWarningMessage(response: any): string | null {
+        const $ = load(response.body);
+
+        const title = $('title').text().trim();
+        let accessDenied: string = '';
+        if (title.toLowerCase().includes('access denied')) {
+            accessDenied = 'Access denied';
+            console.log('HTML Access: Denied');
+        }
+
+        const errorMessage = $('.messages.error').text().trim();
+        if (!!errorMessage) {
+            console.log('HTML Error: ', errorMessage);
+        }
+        const warningMessage = $('.messages.warning').text().trim();
+        if (!!warningMessage) {
+            console.log('HTML Warning: ', warningMessage);
+        }
+
+        if (errorMessage || warningMessage || accessDenied) {
+            return `${errorMessage} ${warningMessage} ${accessDenied}`.trim() || null;
+        } else {
+            return null;
+        }
     }
 }
 
