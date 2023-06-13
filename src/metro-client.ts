@@ -3,6 +3,7 @@ import * as querystring from 'querystring';
 import readline from "readline";
 import {load} from 'cheerio';
 import got from 'got';
+import {IShortPrice} from "./interfaces/short-result.interface.js";
 
 export default class MetroClient {
     private metroUserId: string = '79125005';
@@ -50,6 +51,8 @@ export default class MetroClient {
     // Office value used to get shorts
     private officeValue: string = '78272187';
     private users: { metro: string, metroForm: string }[] = [];
+
+    private isDebugMode: boolean = true;
 
     constructor() {
         this.rl = readline.createInterface({
@@ -101,9 +104,14 @@ export default class MetroClient {
         }
     }
 
-    public async getShortPrice(trader: string, symbol: string, quantity: string): Promise<string> {
+    /**
+     * Gets the short price for a given trader
+     * @param trader
+     * @param symbol
+     * @param quantity
+     */
+    public async getShortsPrice(trader: string, symbol: string, quantity: string): Promise<IShortPrice> {
         try {
-            // return '2.37';
             console.log(`Getting shorts for ${trader}: ${symbol} ${quantity} shares`);
             this.officeValue = await this.accessShortsPage();
             // TODO: Initialize step
@@ -117,7 +125,21 @@ export default class MetroClient {
             return await this.createTickerShortRequest(trader, symbol, quantity);
         } catch (error) {
             console.error('Error getting shorts');
-            return '';
+            return {} as IShortPrice
+        }
+    }
+
+    /**
+     * Gets the short price for a given trader
+     * @param trader
+     * @param symbol
+     * @param quantity
+     */
+    public async confirmShortsOrder(trader: string): Promise<void> {
+        try {
+            console.log(`Confirm shorts for ${trader}`);
+        } catch (error) {
+            console.error('Error getting shorts');
         }
     }
 
@@ -195,6 +217,7 @@ export default class MetroClient {
             };
 
             const response = await got.get('https://metro.dttw.com/metro/', config);
+            this.debugMode(response, 'accessMetro');
 
             if (response.statusCode === 200) {
                 // Check if user logged in
@@ -211,8 +234,7 @@ export default class MetroClient {
         } catch (error: any) {
             // Do not want to print the error timeout, there is already a racecondition with accessMetroWithTimeout
             if (error.code != 'ETIMEDOUT') {
-                this.createHTMLContent(error, 'accessMetro.html')
-                console.error('Error at accessMetro HTTP request: ', error);
+                this.handleCallError(error, 'accessMetro');
                 throw error;
             }
         }
@@ -249,6 +271,8 @@ export default class MetroClient {
                 headers,
                 followRedirect: false,
             });
+            this.debugMode(response, 'accessLogin');
+
 
             if (response.statusCode === 302) {
                 // At this step NO FORM ID is generated when there is the need of 2FA
@@ -266,8 +290,7 @@ export default class MetroClient {
                 console.log('Login failed');
             }
         } catch (error) {
-            this.createHTMLContent(error, 'accessLogin.html')
-            console.error('Error at accessLogin HTTP Request: ', error);
+            this.handleCallError(error, 'accessLogin');
             throw error;
         }
     }
@@ -307,6 +330,9 @@ export default class MetroClient {
                 followRedirect: false
             });
 
+            this.debugMode(response, 'performTwoFactorAuthenticationByMail');
+
+
             if (response.statusCode === 200) {
                 let responseFormIds: { formId: string; formBuildId: string };
                 responseFormIds = this.extractFormBuildIdFromResponse(response);
@@ -314,8 +340,7 @@ export default class MetroClient {
                 this.formId2FAMail = responseFormIds.formId;
             }
         } catch (error) {
-            this.createHTMLContent(error, 'performTwoFactorAuthenticationByMail.html')
-            console.error('Error at performTwoFactorAuthenticationByMail HTTP request:', error);
+            this.handleCallError(error, 'performTwoFactorAuthenticationByMail');
         }
     }
 
@@ -352,6 +377,7 @@ export default class MetroClient {
                 body: formData,
                 followRedirect: false
             });
+            this.debugMode(response, 'submit2FAPinCode');
 
             if (response.statusCode === 302) {
                 const setCookie = response.headers['set-cookie'];
@@ -370,8 +396,7 @@ export default class MetroClient {
             }
             return false;
         } catch (error: any) {
-            this.createHTMLContent(error, 'submit2FAPinCode.html')
-            console.error('Error at submit2FAPinCode HTTP request:', error);
+            this.handleCallError(error, 'submit2FAPinCode');
             return false;
         }
     }
@@ -393,7 +418,8 @@ export default class MetroClient {
                 headers,
             });
 
-            this.extractErrorOrWarningMessage(response);
+            this.debugMode(response, 'accessShortsPage');
+            // this.extractErrorOrWarningMessage(response);
 
             const responseData = response.body;
             const $ = load(responseData);
@@ -408,8 +434,7 @@ export default class MetroClient {
             console.log('officeValue:', officeValue);
             return officeValue;
         } catch (error) {
-            this.createHTMLContent(error, 'accessShortsPage.html')
-            console.error('Error at accessShortsPage HTTP request:', error);
+            this.handleCallError(error, 'accessShortsPage');
             throw error;
         }
     }
@@ -427,6 +452,8 @@ export default class MetroClient {
                 headers,
             });
 
+            this.debugMode(response, 'accessTradersPage');
+
             const responseData = response.body;
             const $ = load(responseData);
             const officeValueElement = $('select[name="field_enhanced_payforshort_offic_nid"] option').not('[value="All"]');
@@ -442,8 +469,7 @@ export default class MetroClient {
             console.log('officeValue:', officeValue);
             return officeValue;
         } catch (error) {
-            this.createHTMLContent(error, 'accessTradersPage.html')
-            console.error('Error at accessTradersPage HTTP request:', error);
+            this.handleCallError(error, 'accessTradersPage');
             throw error;
         }
     }
@@ -463,6 +489,8 @@ export default class MetroClient {
 
             const response = await got.get('https://metro.dttw.com/metro/create-pay-for-short-request', config);
 
+            this.debugMode(response, 'getIdsForShortRequest');
+
             this.extractErrorOrWarningMessage(response);
 
             if (response.statusCode === 200) {
@@ -474,8 +502,7 @@ export default class MetroClient {
                 this.formTokenShortRequest = this.extractFormTokenFromResponse(response);
             }
         } catch (error) {
-            console.error('Error at getIdsForShortRequest HTTP request:', error);
-            this.createHTMLContent(error, 'getIdsForShortRequest.html');
+            this.handleCallError(error, 'getIdsForShortRequest');
             throw error;
         }
     }
@@ -494,7 +521,7 @@ export default class MetroClient {
                     office_dropdown: this.officeValue,
                     op: 'Apply',
                     form_build_id: this.formBuildIdShortRequest,
-                    form_token: this.formIdShortRequest,
+                    form_token: this.formTokenShortRequest,
                     form_id: 'bpm_pay_for_short_request_form'
                 }
             };
@@ -513,6 +540,8 @@ export default class MetroClient {
                 headers
             });
 
+            this.debugMode(response, 'createShortRequestWithOffice');
+
             this.extractErrorOrWarningMessage(response);
 
             if (response.statusCode === 200) {
@@ -524,8 +553,7 @@ export default class MetroClient {
                 this.formTokenShortOfficeRequest = this.extractFormTokenFromResponse(response);
             }
         } catch (error) {
-            this.createHTMLContent(error, 'createShortRequestWithOffice.html')
-            console.error('Error at createShortRequestWithOffice HTTP request:', error);
+            this.handleCallError(error, 'createShortRequestWithOffice');
             throw error;
         }
     }
@@ -536,19 +564,20 @@ export default class MetroClient {
      * Sets ids (formId, formBuilderId, formToken, acceptValue and quoteSource)
      * @private
      */
-    private async createTickerShortRequest(trader: string, ticker: string, quantity: string): Promise<string> {
+    private async createTickerShortRequest(trader: string, ticker: string, quantity: string): Promise<{
+        totalCost: string,
+        pricePerShare: string
+    }> {
         try {
-            console.log('HELLO1');
-
             const postData = {
                 'office_dropdown': this.officeValue,
                 'trader[]': [this.metroUserId],
                 'symbol[]': [ticker],
                 'num_of_shares[]': [quantity],
                 'op': 'Submit',
-                'form_build_id': this.formBuildIdShortRequest,
-                'form_token': this.formTokenShortRequest,
-                'form_id': this.formIdShortRequest
+                'form_build_id': this.formBuildIdShortOfficeRequest,
+                'form_token': this.formTokenShortOfficeRequest,
+                'form_id': this.formIdShortOfficeRequest
             };
 
             const formData = querystring.stringify(postData);
@@ -565,11 +594,9 @@ export default class MetroClient {
                 headers
             });
 
-            this.extractErrorOrWarningMessage(response);
+            this.debugMode(response, 'createTickerShortRequest');
 
             if (response.statusCode === 200) {
-                console.log('HELLO2');
-                console.log(response);
                 // Get the form id's for submitting the createRequestWithOfficeId
                 let responseFormIds: { formId: string; formBuildId: string };
                 responseFormIds = this.extractFormBuildIdFromResponse(response);
@@ -584,13 +611,11 @@ export default class MetroClient {
                 this.acceptValueShortTickerRequest = responseAcceptAndQuoteSource.accept;
                 this.quoteSourceShortTickerRequest = responseAcceptAndQuoteSource.quoteSource;
                 this.quoteSourceShortTickerValueRequest = responseAcceptAndQuoteSource.quoteSourceValue;
-                const totalCost: string = this.extractTotalCost(response);
-                return totalCost;
+                return this.extractPriceAndTotalCost(response);
             }
-            return '';
+            throw new Error('Was not possible to get the locates pricing');
         } catch (error) {
-            this.createHTMLContent(error, 'createTickerShortRequest.html')
-            console.error('Error at createTickerShortRequest HTTP request:', error);
+            this.handleCallError(error, 'createTickerShortRequest');
             throw error;
         }
     }
@@ -622,11 +647,10 @@ export default class MetroClient {
                 body: formData,
                 headers
             });
-
+            this.debugMode(response, 'acceptSelection');
             // Handle the response as needed
         } catch (error) {
-            this.createHTMLContent(error, 'acceptSelection.html')
-            console.error('Error at acceptSelection HTTP request:', error);
+            this.handleCallError(error, 'acceptSelection')
             throw error;
         }
     }
@@ -657,11 +681,11 @@ export default class MetroClient {
                 body: formData,
                 headers
             });
+            this.debugMode(response, 'confirmSelection');
 
             // Handle the response as needed
         } catch (error) {
-            this.createHTMLContent(error, 'confirmSelection.html')
-            console.error('Error at confirmSelection HTTP request:', error);
+            this.handleCallError(error, 'confirmSelection');
             throw error;
         }
     }
@@ -761,14 +785,17 @@ export default class MetroClient {
      * @param response
      * @private
      */
-    private extractTotalCost(response: any): string {
+    private extractPriceAndTotalCost(response: any): { totalCost: string, pricePerShare: string } {
         let totalCost = '';
+        let pricePerShare: string = '';
         const $ = load(response.body);
         $('table.sticky-enabled tbody tr').each(function (i, elem) {
             totalCost = $(this).find('td').eq(6).text(); // index is 0-based
+            pricePerShare = $(this).find('td').eq(5).text(); // index is 0-based
         });
         console.log('Total Cost:', totalCost);
-        return totalCost;
+        console.log('Price per share:', pricePerShare);
+        return {totalCost, pricePerShare};
     }
 
     /**
@@ -848,18 +875,37 @@ export default class MetroClient {
      * @param fileName
      * @private
      */
-    private createHTMLContent(responseData: any, fileName: string): void {
+    private handleCallError(error: any, fileName: string): void {
+        console.error('Error at ' + fileName + ' HTTP request: ', error);
+        this.createHTMLContent(error.response, fileName);
+        this.extractErrorOrWarningMessage(error.responseData.response);
+    }
+
+    /**
+     * Output of request is an html document - creates the html on disk for debugging purposes
+     * @param responseData
+     * @param fileName
+     * @private
+     */
+    private debugMode(response: any, fileName: string): void {
+        if (this.isDebugMode) {
+            console.error('Debug at ' + fileName);
+            this.createHTMLContent(response, fileName);
+            this.extractErrorOrWarningMessage(response);
+        }
+    }
+
+
+    private createHTMLContent(response: any, fileName: string): void {
         const directory = './htmlErrorPages';
-        const filePath: string = directory + '/' + fileName;
+        const filePath: string = directory + '/' + fileName + '.html';
 
         if (!fs.existsSync(directory)) {
             fs.mkdirSync(directory);
         }
 
         console.log(`HTML content written to file: ${filePath}`);
-        fs.writeFileSync(filePath, responseData.response.body);
-        console.log('createHTMLContent calling > extractErrorOrWarningMessage');
-        this.extractErrorOrWarningMessage(responseData.response);
+        fs.writeFileSync(filePath, response.body);
     }
 
     /**

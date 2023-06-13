@@ -18,7 +18,7 @@ export default class HttpServer {
         });
 
         // Route handler for the buy endpoint
-        this.app.get('/buy', async (req: Request, res: Response) => {
+        this.app.get('/buyShorts', async (req: Request, res: Response) => {
             try {
                 console.log('BUY request received');
                 // Parse the ticker and amount parameters
@@ -29,15 +29,32 @@ export default class HttpServer {
                 console.log(`Received buy request: ticker = ${ticker}, amount = ${amount}`);
 
                 console.log('Calling MetroClient - getShort');
-                const price = await this.metroClient.getShortPrice(trader, ticker, amount);
+                const price = await this.metroClient.getShortsPrice(trader, ticker, amount);
 
                 // Send the price in the response
                 res.json({price});
             } catch (error) {
                 console.error('Error handling buy request:', error);
-                res.status(500).send('An error occurred');
+                res.status(500).send('Error handling buy request');
             }
         });
+
+        // Route handler for the buy endpoint
+        this.app.get('/confirmShorts', async (req: Request, res: Response) => {
+            try {
+                console.log('CONFIRM request received');
+
+                console.log('Calling MetroClient - confirmShortsorder');
+                const price = await this.metroClient.confirmShortsOrder('JOAN');
+
+                // Send the price in the response
+                res.json({price});
+            } catch (error) {
+                console.error('Error handling confirmation buy request:', error);
+                res.status(500).send('Error handling confirmation buy request');
+            }
+        });
+
 
         // Route handler for restart connection endpoint
         this.app.get('/restart', async (req: Request, res: Response) => {
