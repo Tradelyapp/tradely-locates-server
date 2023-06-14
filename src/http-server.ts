@@ -7,6 +7,7 @@ export default class HttpServer {
     private port: number = 3000;
 
     constructor(metroClient: MetroClient) {
+        this.app.use(express.json());
         this.metroClient = metroClient;
     }
 
@@ -32,10 +33,18 @@ export default class HttpServer {
                 const price = await this.metroClient.getShortsPrice(trader, ticker, amount);
 
                 // Send the price in the response
-                res.json({price});
-            } catch (error) {
-                console.error('Error handling buy request:', error);
-                res.status(500).send('Error handling buy request');
+                res.json(price);
+            } catch (error: any) {
+                // Check if error message contains 'Can not access Metro'
+                if (error.message.includes('not logged in')) {
+                    console.error('Error message: 401', error.message);
+                    // Not logged in
+                    res.status(401).json({error: error.message}); // Send error as JSON
+                } else {
+                    console.error('Error message: 500');
+                    // All logged errors
+                    res.status(500).json({error: error.message}); // Send error as JSON
+                }
             }
         });
 
@@ -48,7 +57,7 @@ export default class HttpServer {
                 const price = await this.metroClient.confirmShortsOrder('JOAN');
 
                 // Send the price in the response
-                res.json({price});
+                res.json(price);
             } catch (error) {
                 console.error('Error handling confirmation buy request:', error);
                 res.status(500).send('Error handling confirmation buy request');
@@ -60,11 +69,21 @@ export default class HttpServer {
         this.app.get('/restart', async (req: Request, res: Response) => {
             try {
                 console.log('Restart request received');
-
-                res.json(await this.metroClient.restartConnection());
+                res.json(await this.metroClient.handleConnectionWithClientInput2FACode());
             } catch (error) {
                 console.error('Error handling buy request:', error);
                 res.status(500).send('An error occurred');
+            }
+        });
+
+        // Route handler for restart connection endpoint
+        this.app.post('/pin', async (req: Request, res: Response) => {
+            try {
+                console.log('PIN request received ' + req.body.pin);
+                res.json(await this.metroClient.handleConnectionWithClientInput2FACodeApplyingCode(req.body.pin));
+            } catch (error: any) {
+                console.error('Error handling PIN request:', error);
+                res.status(500).json({error: error.message});
             }
         });
 

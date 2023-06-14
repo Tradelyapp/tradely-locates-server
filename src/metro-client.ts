@@ -4,19 +4,23 @@ import readline from "readline";
 import {load} from 'cheerio';
 import got from 'got';
 import {IShortPrice} from "./interfaces/short-result.interface.js";
+import {Context} from "./context.js";
+import {IContextData} from "./interfaces/context-data.interface.js";
+import {IServerStatus} from "./interfaces/server-status.interface.js";
+import {ILoginResultInterface} from "./interfaces/login-result.interface.js";
 
 export default class MetroClient {
+    private context: Context;
+
     private metroUserId: string = '79125005';
 
     private cookies: string[] = ['has_js=1'];
 
+    // If 2FA is needed
     private authLocation: string = '';
 
     private readonly email: string = 'annahuix@yahoo.es';
     private readonly pass: string = 'Ve1oWD9r2ZS6ny';
-
-    // private readonly email: string = 'okoxxx@gmail.com';
-    // private readonly pass: string = '5bLcEQ13YpFj7i';
 
     // Access metro
     private formBuildIdAccessMetro: string = '';
@@ -27,6 +31,9 @@ export default class MetroClient {
     // 2FA: mail
     private formId2FAMail: string = '';
     private formBuildId2FAMail: string = '';
+
+
+    // TODO: these have to be set at session level
     // Create short request #1
     private formBuildIdShortRequest: string = '';
     private formIdShortRequest: string = '';
@@ -52,54 +59,33 @@ export default class MetroClient {
     private officeValue: string = '78272187';
     private users: { metro: string, metroForm: string }[] = [];
 
+    // Will extract error messages on each request
     private isDebugMode: boolean = true;
+    // Will log the HTML response on each request
+    private logHTMLResponse: boolean = false;
 
     constructor() {
         this.rl = readline.createInterface({
             input: process.stdin,
             output: process.stdout
         });
+        this.context = new Context();
     }
 
+    /**
+     * The start is called on the initialization of the server. It means that it could happen the user has no means
+     * to enter the PIN code.
+     *
+     * Moreover, it cannot alert to the telegram bot to enter the PIN code.
+     * /restart should be able to be called and restart the server connection to DTTW properly
+     */
     public async start(): Promise<boolean> {
         try {
             this.loadCookies();
-            console.log('Load cookies: ' + this.cookies);
-            console.log('Access Metro');
-            try {
-                await this.accessMetroWithTimeout(30000);
-            } catch (error) {
-                console.error('Error accessing Metro:', error);
-                return false; // Return false to indicate failure
-            }
-
-            if (this.userLoggedIn) {
-                console.log('Logged in using cookies');
-                console.log('returning true start');
-                return true; // Return true to indicate success
-            }
-
-            console.log('Access Login');
-            await this.accessLogin();
-
-            if (this.authLocation !== '') {
-                console.log('WILL TRIGGER 2FA by MAIL');
-                await this.performTwoFactorAuthenticationByMail(this.authLocation);
-                const pinCode = await this.promptForPinCode();
-                const identified = await this.submit2FAPinCode(this.authLocation, pinCode);
-                if (identified) {
-                    console.log('Identified - going to locates page');
-                    // await this.accessShortsPage();
-                    console.log('returning true start');
-                    return true; // Return true to indicate success
-                }
-            }
-
-            console.log('returning false start');
-            return false; // Return false to indicate failure
+            await this.handleConnection(false);
+            return true;
         } catch (error) {
             console.error('Error performing metro login:', error);
-            console.log('returning false start');
             return false; // Return false to indicate failure
         }
     }
@@ -112,22 +98,36 @@ export default class MetroClient {
      */
     public async getShortsPrice(trader: string, symbol: string, quantity: string): Promise<IShortPrice> {
         try {
+            const connected = await this.handleConnection(true);
+            if (!connected) {
+                throw new Error(`Can not access Metro`);
+            }
+
             console.log(`Getting shorts for ${trader}: ${symbol} ${quantity} shares`);
             this.officeValue = await this.accessShortsPage();
-            // TODO: Initialize step
-            // console.log('accessTradersPage');
-            // await this.accessTradersPage();
+
             console.log('getIdsForShortRequest');
             await this.getIdsForShortRequest();
+
             console.log('createShortRequestWithOffice');
             await this.createShortRequestWithOffice();
+
             console.log('createTickerShortRequest');
-            return await this.createTickerShortRequest(trader, symbol, quantity);
-        } catch (error) {
-            console.error('Error getting shorts');
-            return {} as IShortPrice
+            const shortPriceResult: IShortPrice = await this.createTickerShortRequest(trader, symbol, quantity);
+
+            this.context.store(trader, {
+                formId: this.formIdShortTickerRequest,
+                formBuildId: this.formBuildIdShortTickerRequest,
+                formToken: this.formTokenShortRequest,
+                timestamp: Date.now()
+            });
+
+            return shortPriceResult;
+        } catch (error: any) {
+            throw new Error(`Error getting shorts: ${error.message}`);
         }
     }
+
 
     /**
      * Gets the short price for a given trader
@@ -137,37 +137,160 @@ export default class MetroClient {
      */
     public async confirmShortsOrder(trader: string): Promise<void> {
         try {
-            console.log(`Confirm shorts for ${trader}`);
+            const userContext: IContextData | null = await this.context.get(trader);
+            if (!!userContext) {
+                console.log(`Confirm shorts for ${trader}`);
+                // await this.confirmShortsRequest(userContext.formId, userContext.formBuildId, userContext.formToken);
+            } else {
+                console.log(`No context for ${trader}, the confirm shorts request will be skipped`);
+            }
         } catch (error) {
             console.error('Error getting shorts');
         }
     }
 
-    public async restartConnection(): Promise<boolean> {
+    /**
+     * Checks if the user is logged in by accessing to the metro page, if not connected it can retry the login
+     * This is used in shorts request, if not connected and 2FA is required, it will be skipped
+     *
+     * @param skip2FA
+     */
+    public async handleConnection(skip2FA: boolean): Promise<boolean> {
         try {
-            return true;
-        } catch (error) {
-            console.error('Error restarting connection');
+            console.log('Access Metro');
+            try {
+                await this.accessMetroWithTimeout(20000);
+            } catch (error) {
+                console.error('Error accessing Metro:', error);
+                return false; // Return false to indicate failure
+            }
+
+            if (this.userLoggedIn) {
+                return true; // Return true to indicate success
+            }
+
+            await this.accessLogin();
+
+            if (this.authLocation !== '' && !skip2FA) {
+                console.log('WILL TRIGGER 2FA by MAIL');
+                await this.performTwoFactorAuthenticationByMail(this.authLocation);
+
+                // Set timeout for PIN authentication otherwise server will be blocked
+                const pinCodePromise = this.promptForPinCode().catch(_ => '');
+                const timeoutPromise = new Promise<string>((_, reject) => setTimeout(() => reject('Timeout Error'), 25000)); // 25 seconds
+                let pinCode;
+                try {
+                    pinCode = await Promise.race([pinCodePromise, timeoutPromise]);
+                } catch (error: any) {
+                    console.log('Timeout PIN Input:', error.message);
+                    return false;
+                }
+
+                const identified = await this.submit2FAPinCode(this.authLocation, pinCode);
+
+                if (identified) {
+                    return true; // Return true to indicate success
+                }
+            } else if (this.authLocation !== '' && skip2FA) {
+                throw new Error('Short request: Skipped 2FA, not logged in');
+            }
             return false;
+        } catch (error: any) {
+            throw new Error(`Error performing metro login: ${error.message}`);
         }
     }
 
-    public async getServerStatus(): Promise<any> {
+    /**
+     * Logs in to metro in case the cookies are valid or not needed a 2FA authentication
+     * In case Pin code is needed, it will be requested to the user
+     *
+     * This is used in the /restart command
+     */
+    public async handleConnectionWithClientInput2FACode(): Promise<ILoginResultInterface> {
         try {
-            let serverStatus: any = {};
-            serverStatus.status = 'ok';
-            serverStatus.message = 'Server is running';
-            serverStatus.cookies = this.cookies;
-            serverStatus.userLoggedIn = this.userLoggedIn;
-            serverStatus.officeValue = this.officeValue;
-            serverStatus.users = this.users
+            console.log('Access Metro');
+
+            try {
+                await this.accessMetroWithTimeout(20000);
+            } catch (error) {
+                console.error('Error accessing Metro:', error);
+                return {is2FARequired: false, loggedIn: false}; // Return false to indicate failure
+            }
+
+            if (this.userLoggedIn) {
+                return {is2FARequired: false, loggedIn: true};
+            }
+
+            await this.accessLogin();
+
+            if (this.authLocation !== '') {
+                console.log('WILL TRIGGER 2FA by MAIL');
+                await this.performTwoFactorAuthenticationByMail(this.authLocation);
+                return {is2FARequired: true, loggedIn: false};
+            }
+            return {is2FARequired: false, loggedIn: false};
+        } catch (error) {
+            console.error('Error performing metro login:', error);
+            return {is2FARequired: false, loggedIn: false};
+        }
+    }
+
+    /**
+     * Enters the 2FA PIN code
+     * @param pinCode
+     */
+    public async handleConnectionWithClientInput2FACodeApplyingCode(pinCode: string): Promise<boolean> {
+        try {
+            const identified = await this.submit2FAPinCode(this.authLocation, pinCode);
+            if (identified) {
+                console.log('Identified - going to locates page');
+                return true;
+            }
+            return false;
+        } catch (error: any) {
+            console.error('Error performing metro login:', error);
+            throw new Error(`Error 2FA PIN:${error.message}`);
+        }
+    }
+
+    public async getServerStatus(): Promise<IServerStatus> {
+        try {
+            let serverStatus: IServerStatus = {
+                status: 'ok',
+                message: 'Server is running',
+                cookies: this.cookies,
+                userLoggedIn: this.userLoggedIn,
+                officeValue: this.officeValue,
+                users: this.users
+            };
             return serverStatus;
         } catch (error) {
-            console.error('Error getting server status');
-            return {};
+            console.error('Error getting server status: ', error);
+            return {
+                status: 'error',
+                message: 'Error getting server status',
+                cookies: [],
+                userLoggedIn: false,
+                officeValue: '',
+                users: []
+            };
         }
     }
 
+
+    /**
+     * Initialize office config
+     */
+    public async initializeOfficeConfig(): Promise<boolean> {
+        this.officeValue = await this.accessShortsPage();
+        this.users = await this.accessTradersPage();
+        return true;
+    }
+
+    /**
+     * Ask user in terminal to input the 2FA code
+     * @private
+     */
     private async promptForPinCode(): Promise<string> {
         return new Promise((resolve, reject) => {
             this.rl.question('Enter the PIN code sent to your email: ', (pinCode) => {
@@ -200,10 +323,8 @@ export default class MetroClient {
         } catch (error) {
             console.error('Error at accessMetroWithTimeout:', error);
             throw error;
-            // Handle the error as needed
         }
     }
-
 
     /**
      * Access metro - get the formId and set has_js cookie
@@ -225,6 +346,7 @@ export default class MetroClient {
                     this.userLoggedIn = true;
                 } else {
                     this.userLoggedIn = false;
+                    // Get the ids for the login page
                     let responseFormIds: { formId: string; formBuildId: string };
                     responseFormIds = this.extractFormBuildIdFromResponse(response);
                     this.formBuildIdAccessMetro = responseFormIds.formBuildId;
@@ -353,6 +475,7 @@ export default class MetroClient {
      */
     private async submit2FAPinCode(url: string, pinCode: string): Promise<boolean> {
         try {
+            console.log('SUBMIT PIN is: ', pinCode);
             const postData = {
                 formData: {
                     authentication_code: pinCode,
@@ -419,7 +542,6 @@ export default class MetroClient {
             });
 
             this.debugMode(response, 'accessShortsPage');
-            // this.extractErrorOrWarningMessage(response);
 
             const responseData = response.body;
             const $ = load(responseData);
@@ -620,6 +742,10 @@ export default class MetroClient {
         }
     }
 
+    /**
+     * #4 call for the short request process - it will trigger the countdown
+     * @private
+     */
     private async acceptSelection(): Promise<void> {
         try {
             const postData = {
@@ -655,6 +781,11 @@ export default class MetroClient {
         }
     }
 
+
+    /*************************************************************************************************
+     ********************************************* UTILS *********************************************
+     *************************************************************************************************/
+
     private async confirmSelection(): Promise<void> {
         try {
             const postData = {
@@ -689,11 +820,6 @@ export default class MetroClient {
             throw error;
         }
     }
-
-
-    /*************************************************************************************************
-     ********************************************* UTILS *********************************************
-     *************************************************************************************************/
 
     /**
      * Parses the html response and extracts the FormId and FormBuildId
@@ -807,7 +933,6 @@ export default class MetroClient {
         fs.writeFileSync('cookies.json', cookiesData);
     }
 
-
     /**
      * Load cookies from file system
      * @private
@@ -876,9 +1001,10 @@ export default class MetroClient {
      * @private
      */
     private handleCallError(error: any, fileName: string): void {
-        console.error('Error at ' + fileName + ' HTTP request: ', error);
+        console.error('Error at ' + fileName + ' HTTP request: ', error.message);
         this.createHTMLContent(error.response, fileName);
-        this.extractErrorOrWarningMessage(error.responseData.response);
+        // TODO Check this: this.extractErrorOrWarningMessage(error.responseData.response);
+        this.extractErrorOrWarningMessage(error.response);
     }
 
     /**
@@ -890,11 +1016,13 @@ export default class MetroClient {
     private debugMode(response: any, fileName: string): void {
         if (this.isDebugMode) {
             console.error('Debug at ' + fileName);
-            this.createHTMLContent(response, fileName);
             this.extractErrorOrWarningMessage(response);
+            if (this.logHTMLResponse) {
+                this.createHTMLContent(response, fileName);
+            }
+
         }
     }
-
 
     private createHTMLContent(response: any, fileName: string): void {
         const directory = './htmlErrorPages';
@@ -906,15 +1034,6 @@ export default class MetroClient {
 
         console.log(`HTML content written to file: ${filePath}`);
         fs.writeFileSync(filePath, response.body);
-    }
-
-    /**
-     * Initialize office config
-     */
-    private async initializeOfficeConfig(): Promise<boolean> {
-        this.officeValue = await this.accessShortsPage();
-        this.users = await this.accessTradersPage();
-        return true;
     }
 
     private extractErrorOrWarningMessage(response: any): string | null {
