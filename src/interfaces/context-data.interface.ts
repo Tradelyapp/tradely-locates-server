@@ -1,6 +1,7 @@
+import {IMetroCallParameters} from "./metro-call-parameters.interface.js";
+
 export interface IContextData {
-    formId: string;
-    formBuildId: string;
-    formToken: string;
+    contextForPIN?: IMetroCallParameters;
+    contextForShortConfirm?: IMetroCallParameters;
     timestamp: number;
 }

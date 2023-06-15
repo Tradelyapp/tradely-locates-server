@@ -69,7 +69,7 @@ export default class HttpServer {
         this.app.get('/restart', async (req: Request, res: Response) => {
             try {
                 console.log('Restart request received');
-                res.json(await this.metroClient.handleConnectionWithClientInput2FACode());
+                res.json(await this.metroClient.handleConnectionWithClientInput2FACode('JOAN'));
             } catch (error) {
                 console.error('Error handling buy request:', error);
                 res.status(500).send('An error occurred');
@@ -80,7 +80,7 @@ export default class HttpServer {
         this.app.post('/pin', async (req: Request, res: Response) => {
             try {
                 console.log('PIN request received ' + req.body.pin);
-                res.json(await this.metroClient.handleConnectionWithClientInput2FACodeApplyingCode(req.body.pin));
+                res.json(await this.metroClient.handleConnectionWithClientInput2FACodeApplyingCode('JOAN', req.body.pin));
             } catch (error: any) {
                 console.error('Error handling PIN request:', error);
                 res.status(500).json({error: error.message});
