@@ -11,7 +11,7 @@ export class Context {
     public get(key: string): IContextData | null {
         const ONE_MINUTE = 60 * 1000; // Milliseconds in a minute
         const value = this.userCache[key];
-
+        return value; // TODO : Remove after testing there is a context
         if (value && (Date.now() - value.timestamp) < ONE_MINUTE) {
             return value;
         } else {
