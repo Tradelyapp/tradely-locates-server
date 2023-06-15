@@ -3,11 +3,12 @@ import * as querystring from 'querystring';
 import readline from "readline";
 import {load} from 'cheerio';
 import got from 'got';
-import {IShortPrice} from "./interfaces/short-result.interface.js";
+import {IShortPrice, IShortPriceWithContext} from "./interfaces/short-result.interface.js";
 import {Context} from "./context.js";
 import {IContextData} from "./interfaces/context-data.interface.js";
 import {IServerStatus} from "./interfaces/server-status.interface.js";
 import {ILoginResultInterface} from "./interfaces/login-result.interface.js";
+import {IMetroCallParameters, MetroCallParameters} from "./interfaces/metro-call-parameters.interface.js";
 
 export default class MetroClient {
     private context: Context;
@@ -22,33 +23,33 @@ export default class MetroClient {
     private readonly email: string = 'annahuix@yahoo.es';
     private readonly pass: string = 'Ve1oWD9r2ZS6ny';
 
-    // Access metro
-    private formBuildIdAccessMetro: string = '';
-    private formIdAccessMetro: string = '';
-    // Login
-    private formBuildIdLogin: string = '';
-    private formIdLogin: string = '';
-    // 2FA: mail
-    private formId2FAMail: string = '';
-    private formBuildId2FAMail: string = '';
-
-
-    // TODO: these have to be set at session level
-    // Create short request #1
-    private formBuildIdShortRequest: string = '';
-    private formIdShortRequest: string = '';
-    private formTokenShortRequest: string = '';
-    // Create short request #2 - Submit office
-    private formBuildIdShortOfficeRequest: string = '';
-    private formIdShortOfficeRequest: string = '';
-    private formTokenShortOfficeRequest: string = '';
-    // Create short request #3 - Submit ticker and quantity
-    private formBuildIdShortTickerRequest: string = '';
-    private formIdShortTickerRequest: string = '';
-    private formTokenShortTickerRequest: string = '';
-    private acceptValueShortTickerRequest: string = '';
-    private quoteSourceShortTickerRequest: string = '';
-    private quoteSourceShortTickerValueRequest: string = '';
+    // // Access metro
+    // private formBuildIdAccessMetro: string = '';
+    // private formIdAccessMetro: string = '';
+    // // Login
+    // private formBuildIdLogin: string = '';
+    // private formIdLogin: string = '';
+    // // 2FA: mail
+    // private formId2FAMail: string = '';
+    // private formBuildId2FAMail: string = '';
+    //
+    //
+    // // TODO: these have to be set at session level
+    // // Create short request #1
+    // private formBuildIdShortRequest: string = '';
+    // private formIdShortRequest: string = '';
+    // private formTokenShortRequest: string = '';
+    // // Create short request #2 - Submit office
+    // private formBuildIdShortOfficeRequest: string = '';
+    // private formIdShortOfficeRequest: string = '';
+    // private formTokenShortOfficeRequest: string = '';
+    // // Create short request #3 - Submit ticker and quantity
+    // private formBuildIdShortTickerRequest: string = '';
+    // private formIdShortTickerRequest: string = '';
+    // private formTokenShortTickerRequest: string = '';
+    // private acceptValueShortTickerRequest: string = '';
+    // private quoteSourceShortTickerRequest: string = '';
+    // private quoteSourceShortTickerValueRequest: string = '';
 
 
     // User input readline
@@ -107,22 +108,22 @@ export default class MetroClient {
             this.officeValue = await this.accessShortsPage();
 
             console.log('getIdsForShortRequest');
-            await this.getIdsForShortRequest();
+            const metroDataShortRequest: IMetroCallParameters = await this.getIdsForShortRequest();
 
             console.log('createShortRequestWithOffice');
-            await this.createShortRequestWithOffice();
+            const metroDataShortRequestWithOfficeId: IMetroCallParameters = await this.createShortRequestWithOffice(metroDataShortRequest);
 
             console.log('createTickerShortRequest');
-            const shortPriceResult: IShortPrice = await this.createTickerShortRequest(trader, symbol, quantity);
+            const shortPriceContextResult: IShortPriceWithContext = await this.createTickerShortRequest(trader, symbol, quantity, metroDataShortRequestWithOfficeId);
 
+            // Store the context for the confirmation of the purchase in another request
             this.context.store(trader, {
-                formId: this.formIdShortTickerRequest,
-                formBuildId: this.formBuildIdShortTickerRequest,
-                formToken: this.formTokenShortRequest,
+                contextForShortConfirm: shortPriceContextResult.metroCallParameters,
                 timestamp: Date.now()
             });
 
-            return shortPriceResult;
+            const shortPrice: IShortPrice = shortPriceContextResult as IShortPrice;
+            return shortPrice;
         } catch (error: any) {
             throw new Error(`Error getting shorts: ${error.message}`);
         }
@@ -158,8 +159,9 @@ export default class MetroClient {
     public async handleConnection(skip2FA: boolean): Promise<boolean> {
         try {
             console.log('Access Metro');
+            let accessMetroCallParameters: MetroCallParameters = new MetroCallParameters();
             try {
-                await this.accessMetroWithTimeout(20000);
+                accessMetroCallParameters = await this.accessMetroWithTimeout(20000);
             } catch (error) {
                 console.error('Error accessing Metro:', error);
                 return false; // Return false to indicate failure
@@ -169,11 +171,11 @@ export default class MetroClient {
                 return true; // Return true to indicate success
             }
 
-            await this.accessLogin();
+            const accessLoginCallParameters = await this.accessLogin(accessMetroCallParameters);
 
-            if (this.authLocation !== '' && !skip2FA) {
+            if (accessLoginCallParameters.authLocation !== '' && !skip2FA) {
                 console.log('WILL TRIGGER 2FA by MAIL');
-                await this.performTwoFactorAuthenticationByMail(this.authLocation);
+                const email2FAMetroCallParameters = await this.performTwoFactorAuthenticationByMail(accessLoginCallParameters);
 
                 // Set timeout for PIN authentication otherwise server will be blocked
                 const pinCodePromise = this.promptForPinCode().catch(_ => '');
@@ -186,7 +188,7 @@ export default class MetroClient {
                     return false;
                 }
 
-                const identified = await this.submit2FAPinCode(this.authLocation, pinCode);
+                const identified = await this.submit2FAPinCode(accessLoginCallParameters, pinCode);
 
                 if (identified) {
                     return true; // Return true to indicate success
@@ -206,12 +208,12 @@ export default class MetroClient {
      *
      * This is used in the /restart command
      */
-    public async handleConnectionWithClientInput2FACode(): Promise<ILoginResultInterface> {
+    public async handleConnectionWithClientInput2FACode(trader: string): Promise<ILoginResultInterface> {
         try {
             console.log('Access Metro');
-
+            let accessMetroCallParameters: MetroCallParameters = new MetroCallParameters();
             try {
-                await this.accessMetroWithTimeout(20000);
+                accessMetroCallParameters = await this.accessMetroWithTimeout(20000);
             } catch (error) {
                 console.error('Error accessing Metro:', error);
                 return {is2FARequired: false, loggedIn: false}; // Return false to indicate failure
@@ -221,11 +223,19 @@ export default class MetroClient {
                 return {is2FARequired: false, loggedIn: true};
             }
 
-            await this.accessLogin();
+            const accessLoginCallParameters = await this.accessLogin(accessMetroCallParameters);
 
-            if (this.authLocation !== '') {
+            console.log('Restart authLocation: ' + this.authLocation);
+            console.log('Restart accessLoginCallParameters authLocation: ' + accessLoginCallParameters.authLocation);
+            if (accessLoginCallParameters.authLocation !== '') {
                 console.log('WILL TRIGGER 2FA by MAIL');
-                await this.performTwoFactorAuthenticationByMail(this.authLocation);
+                await this.performTwoFactorAuthenticationByMail(accessLoginCallParameters);
+                // Store the context for the 2FA Mail to enter the PIN later on another request
+                this.context.store(trader, {
+                    contextForPIN: accessLoginCallParameters,
+                    timestamp: Date.now()
+                });
+
                 return {is2FARequired: true, loggedIn: false};
             }
             return {is2FARequired: false, loggedIn: false};
@@ -236,12 +246,18 @@ export default class MetroClient {
     }
 
     /**
-     * Enters the 2FA PIN code
+     * Enters the 2FA PIN code - need to get from session the MetroCallParameters ( Metro context )
      * @param pinCode
      */
-    public async handleConnectionWithClientInput2FACodeApplyingCode(pinCode: string): Promise<boolean> {
+    public async handleConnectionWithClientInput2FACodeApplyingCode(trader: string, pinCode: string): Promise<boolean> {
         try {
-            const identified = await this.submit2FAPinCode(this.authLocation, pinCode);
+            let traderContext: IContextData = this.context.get(trader)
+
+            // Don't perform the call if there is no context, otherwise the login PIN call will fail for missing formId,token...
+            if (!traderContext) {
+                throw new Error(`No context for ${trader}`);
+            }
+            const identified = await this.submit2FAPinCode(traderContext.contextForPIN, pinCode);
             if (identified) {
                 console.log('Identified - going to locates page');
                 return true;
@@ -255,7 +271,10 @@ export default class MetroClient {
 
     public async getServerStatus(): Promise<IServerStatus> {
         try {
-            let serverStatus: IServerStatus = {
+            // To know if the CubeX is available and if Metro is available and logged in
+            await this.accessMetroWithTimeout(20000);
+
+            return {
                 status: 'ok',
                 message: 'Server is running',
                 cookies: this.cookies,
@@ -263,16 +282,14 @@ export default class MetroClient {
                 officeValue: this.officeValue,
                 users: this.users
             };
-            return serverStatus;
-        } catch (error) {
-            console.error('Error getting server status: ', error);
+        } catch (error: any) {
             return {
                 status: 'error',
-                message: 'Error getting server status',
-                cookies: [],
-                userLoggedIn: false,
-                officeValue: '',
-                users: []
+                message: 'Error getting server status ' + error.message,
+                cookies: this.cookies,
+                userLoggedIn: this.userLoggedIn,
+                officeValue: this.officeValue,
+                users: this.users
             };
         }
     }
@@ -309,27 +326,22 @@ export default class MetroClient {
      * @param timeout
      * @private
      */
-    private async accessMetroWithTimeout(timeout: number): Promise<void> {
+    private async accessMetroWithTimeout(timeout: number): Promise<IMetroCallParameters> {
         const accessMetroPromise = this.accessMetro();
 
-        const timeoutPromise = new Promise<void>((resolve, reject) => {
+        const timeoutPromise = new Promise<IMetroCallParameters>((_, reject) => {
             setTimeout(() => {
                 reject(new Error('Access Metro request timed out - Check that the CubeX is connected and a PPro instance is running'));
             }, timeout);
         });
-
-        try {
-            await Promise.race([accessMetroPromise, timeoutPromise]);
-        } catch (error) {
-            console.error('Error at accessMetroWithTimeout:', error);
-            throw error;
-        }
+        return await Promise.race([accessMetroPromise, timeoutPromise]);
     }
+
 
     /**
      * Access metro - get the formId and set has_js cookie
      */
-    private async accessMetro(): Promise<void> {
+    private async accessMetro(): Promise<IMetroCallParameters> {
         try {
             const config: any = {
                 headers: {
@@ -340,6 +352,8 @@ export default class MetroClient {
             const response = await got.get('https://metro.dttw.com/metro/', config);
             this.debugMode(response, 'accessMetro');
 
+            let outputMetroCallParameters: IMetroCallParameters = new MetroCallParameters();
+
             if (response.statusCode === 200) {
                 // Check if user logged in
                 if (this.checkIfLoggedIn(response)) {
@@ -347,18 +361,17 @@ export default class MetroClient {
                 } else {
                     this.userLoggedIn = false;
                     // Get the ids for the login page
-                    let responseFormIds: { formId: string; formBuildId: string };
-                    responseFormIds = this.extractFormBuildIdFromResponse(response);
-                    this.formBuildIdAccessMetro = responseFormIds.formBuildId;
-                    this.formIdAccessMetro = responseFormIds.formId;
+                    this.extractFormBuildIdFromResponse(response, outputMetroCallParameters);
                 }
             }
+            return outputMetroCallParameters;
         } catch (error: any) {
-            // Do not want to print the error timeout, there is already a racecondition with accessMetroWithTimeout
+            // Do not want to print the error timeout, there is already a race condition with accessMetroWithTimeout
             if (error.code != 'ETIMEDOUT') {
                 this.handleCallError(error, 'accessMetro');
                 throw error;
             }
+            throw new Error("Error at access Metro");
         }
     }
 
@@ -370,13 +383,13 @@ export default class MetroClient {
      * @param formBuildId - from first access to metro page - used on all requests
      * @param formId - from first access to metro page - used on all requests
      */
-    private async accessLogin(): Promise<void> {
+    private async accessLogin(metroCallParameters: IMetroCallParameters): Promise<IMetroCallParameters> {
         try {
             const loginData = querystring.stringify({
                 name: this.email,
                 pass: this.pass,
-                form_build_id: this.formBuildIdAccessMetro,
-                form_id: this.formIdAccessMetro,
+                form_build_id: metroCallParameters.formBuildId,
+                form_id: metroCallParameters.formId,
                 op: 'Log in'
             });
 
@@ -395,22 +408,21 @@ export default class MetroClient {
             });
             this.debugMode(response, 'accessLogin');
 
+            let outputMetroCallParameters: IMetroCallParameters = new MetroCallParameters();
 
             if (response.statusCode === 302) {
                 // At this step NO FORM ID is generated when there is the need of 2FA
-                let responseFormIds: { formId: string; formBuildId: string };
-                responseFormIds = this.extractFormBuildIdFromResponse(response);
-                this.formBuildIdLogin = responseFormIds.formBuildId;
-                this.formIdLogin = responseFormIds.formId;
+                this.extractFormBuildIdFromResponse(response, outputMetroCallParameters);
 
                 if (response.headers['set-cookie']) {
                     console.log('accessLogin Cookies: ', response.headers['set-cookie']);
                     this.cookies.push(...response.headers['set-cookie']);
                 }
-                this.authLocation = !!response?.headers?.location ? response?.headers?.location : '';
+                outputMetroCallParameters.authLocation = !!response?.headers?.location ? response?.headers?.location : '';
             } else {
                 console.log('Login failed');
             }
+            return outputMetroCallParameters;
         } catch (error) {
             this.handleCallError(error, 'accessLogin');
             throw error;
@@ -423,7 +435,7 @@ export default class MetroClient {
      * @param cookies
      * @param formBuildId
      */
-    private async performTwoFactorAuthenticationByMail(url: string): Promise<void> {
+    private async performTwoFactorAuthenticationByMail(metroCallParameters: IMetroCallParameters): Promise<void> {
         try {
             const postData = {
                 mimeType: 'application/x-www-form-urlencoded',
@@ -431,7 +443,7 @@ export default class MetroClient {
                     destination: 'node',
                     authentication_type: 'email',
                     op: 'Submit',
-                    form_build_id: this.formBuildIdAccessMetro,
+                    form_build_id: metroCallParameters.formBuildId,
                     form_id: 'bpm_two_factor_authentication_form'
                 }
             };
@@ -441,12 +453,12 @@ export default class MetroClient {
             const headers = {
                 'Content-Type': postData.mimeType,
                 Cookie: this.cookies.join('; '), // Set the cookies in the request
-                Referer: url,
+                Referer: metroCallParameters.authLocation,
                 'User-Agent':
                     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
             };
 
-            const response = await got.post(url, {
+            const response = await got.post(metroCallParameters.authLocation, {
                 body: formData,
                 headers,
                 followRedirect: false
@@ -455,11 +467,9 @@ export default class MetroClient {
             this.debugMode(response, 'performTwoFactorAuthenticationByMail');
 
 
+            let outputMetroCallParameters: IMetroCallParameters = new MetroCallParameters();
             if (response.statusCode === 200) {
-                let responseFormIds: { formId: string; formBuildId: string };
-                responseFormIds = this.extractFormBuildIdFromResponse(response);
-                this.formBuildId2FAMail = responseFormIds.formBuildId;
-                this.formId2FAMail = responseFormIds.formId;
+                this.extractFormBuildIdFromResponse(response, outputMetroCallParameters);
             }
         } catch (error) {
             this.handleCallError(error, 'performTwoFactorAuthenticationByMail');
@@ -473,14 +483,14 @@ export default class MetroClient {
      * @param formBuildId
      * @param pinCode
      */
-    private async submit2FAPinCode(url: string, pinCode: string): Promise<boolean> {
+    private async submit2FAPinCode(metroCallParameters: IMetroCallParameters, pinCode: string): Promise<boolean> {
         try {
             console.log('SUBMIT PIN is: ', pinCode);
             const postData = {
                 formData: {
                     authentication_code: pinCode,
                     op: 'Submit',
-                    form_build_id: this.formBuildId2FAMail,
+                    form_build_id: metroCallParameters.formBuildId,
                     form_id: 'bpm_two_factor_authentication_form'
                 }
             };
@@ -490,11 +500,11 @@ export default class MetroClient {
             const headers = {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 Cookie: this.cookies.join('; '),
-                Referer: url,
+                Referer: metroCallParameters.authLocation,
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
             };
 
-            const response = await got.post(url, {
+            const response = await got.post(metroCallParameters.authLocation, {
                 method: 'POST',
                 headers,
                 body: formData,
@@ -601,7 +611,7 @@ export default class MetroClient {
      * Gets the short request form id's
      * @private
      */
-    private async getIdsForShortRequest(): Promise<void> {
+    private async getIdsForShortRequest(): Promise<IMetroCallParameters> {
         try {
             const config: any = {
                 headers: {
@@ -615,14 +625,14 @@ export default class MetroClient {
 
             this.extractErrorOrWarningMessage(response);
 
+            let outputMetroCallParameters: IMetroCallParameters = new MetroCallParameters();
+
             if (response.statusCode === 200) {
                 // Get the form id's for to submit of the createRequestWithOfficeId
-                let responseFormIds: { formId: string; formBuildId: string };
-                responseFormIds = this.extractFormBuildIdFromResponse(response);
-                this.formBuildIdShortRequest = responseFormIds.formBuildId;
-                this.formIdShortRequest = responseFormIds.formId;
-                this.formTokenShortRequest = this.extractFormTokenFromResponse(response);
+                this.extractFormBuildIdFromResponse(response, outputMetroCallParameters);
+                this.extractFormTokenFromResponse(response, outputMetroCallParameters);
             }
+            return outputMetroCallParameters;
         } catch (error) {
             this.handleCallError(error, 'getIdsForShortRequest');
             throw error;
@@ -634,7 +644,7 @@ export default class MetroClient {
      * Submits the office id, the aim is to get a form ids for the shorts request
      * @private
      */
-    private async createShortRequestWithOffice(): Promise<void> {
+    private async createShortRequestWithOffice(metroCallParameters: IMetroCallParameters): Promise<IMetroCallParameters> {
         try {
 
             const postData = {
@@ -642,8 +652,8 @@ export default class MetroClient {
                 formData: {
                     office_dropdown: this.officeValue,
                     op: 'Apply',
-                    form_build_id: this.formBuildIdShortRequest,
-                    form_token: this.formTokenShortRequest,
+                    form_build_id: metroCallParameters.formBuildId,
+                    form_token: metroCallParameters.formToken,
                     form_id: 'bpm_pay_for_short_request_form'
                 }
             };
@@ -664,16 +674,16 @@ export default class MetroClient {
 
             this.debugMode(response, 'createShortRequestWithOffice');
 
+            let outputMetroCallParameters: IMetroCallParameters = new MetroCallParameters();
+
             this.extractErrorOrWarningMessage(response);
 
             if (response.statusCode === 200) {
                 // Get the form id's for to submit of the createRequestWithOfficeId
-                let responseFormIds: { formId: string; formBuildId: string };
-                responseFormIds = this.extractFormBuildIdFromResponse(response);
-                this.formBuildIdShortOfficeRequest = responseFormIds.formBuildId;
-                this.formIdShortOfficeRequest = responseFormIds.formId;
-                this.formTokenShortOfficeRequest = this.extractFormTokenFromResponse(response);
+                this.extractFormBuildIdFromResponse(response, outputMetroCallParameters);
+                this.extractFormTokenFromResponse(response, outputMetroCallParameters);
             }
+            return outputMetroCallParameters;
         } catch (error) {
             this.handleCallError(error, 'createShortRequestWithOffice');
             throw error;
@@ -686,10 +696,7 @@ export default class MetroClient {
      * Sets ids (formId, formBuilderId, formToken, acceptValue and quoteSource)
      * @private
      */
-    private async createTickerShortRequest(trader: string, ticker: string, quantity: string): Promise<{
-        totalCost: string,
-        pricePerShare: string
-    }> {
+    private async createTickerShortRequest(trader: string, ticker: string, quantity: string, metroCallParameters: IMetroCallParameters): Promise<IShortPriceWithContext> {
         try {
             const postData = {
                 'office_dropdown': this.officeValue,
@@ -697,9 +704,9 @@ export default class MetroClient {
                 'symbol[]': [ticker],
                 'num_of_shares[]': [quantity],
                 'op': 'Submit',
-                'form_build_id': this.formBuildIdShortOfficeRequest,
-                'form_token': this.formTokenShortOfficeRequest,
-                'form_id': this.formIdShortOfficeRequest
+                'form_build_id': metroCallParameters.formBuildId,
+                'form_token': metroCallParameters.formToken,
+                'form_id': metroCallParameters.formId
             };
 
             const formData = querystring.stringify(postData);
@@ -716,24 +723,25 @@ export default class MetroClient {
                 headers
             });
 
+            let outputMetroCallParameters: IMetroCallParameters = new MetroCallParameters();
             this.debugMode(response, 'createTickerShortRequest');
 
             if (response.statusCode === 200) {
                 // Get the form id's for submitting the createRequestWithOfficeId
                 let responseFormIds: { formId: string; formBuildId: string };
-                responseFormIds = this.extractFormBuildIdFromResponse(response);
-                this.formBuildIdShortTickerRequest = responseFormIds.formBuildId;
-                this.formIdShortTickerRequest = responseFormIds.formId;
-                this.formTokenShortTickerRequest = this.extractFormTokenFromResponse(response);
-                const responseAcceptAndQuoteSource: {
-                    accept: string;
-                    quoteSource: string,
-                    quoteSourceValue: string
-                } = this.extractAcceptAndQuoteSource(response);
-                this.acceptValueShortTickerRequest = responseAcceptAndQuoteSource.accept;
-                this.quoteSourceShortTickerRequest = responseAcceptAndQuoteSource.quoteSource;
-                this.quoteSourceShortTickerValueRequest = responseAcceptAndQuoteSource.quoteSourceValue;
-                return this.extractPriceAndTotalCost(response);
+                this.extractFormBuildIdFromResponse(response, outputMetroCallParameters);
+                ;
+                this.extractFormTokenFromResponse(response, outputMetroCallParameters);
+                this.extractAcceptAndQuoteSource(response, outputMetroCallParameters);
+                const priceAndTotalCost: {
+                    totalCost: string,
+                    pricePerShare: string
+                } = this.extractPriceAndTotalCost(response);
+                return {
+                    totalCost: priceAndTotalCost.totalCost,
+                    pricePerShare: priceAndTotalCost.pricePerShare,
+                    metroCallParameters: outputMetroCallParameters
+                } as IShortPriceWithContext;
             }
             throw new Error('Was not possible to get the locates pricing');
         } catch (error) {
@@ -746,17 +754,17 @@ export default class MetroClient {
      * #4 call for the short request process - it will trigger the countdown
      * @private
      */
-    private async acceptSelection(): Promise<void> {
+    private async acceptSelection(metroCallParameters: IMetroCallParameters): Promise<void> {
         try {
             const postData = {
                 mimeType: 'application/x-www-form-urlencoded',
                 formData: {
                     accept: '1',
-                    quote_source: this.quoteSourceShortTickerRequest,
+                    quote_source: metroCallParameters.quoteSource,
                     op: 'Submit',
-                    form_build_id: 'form-xNTppYa87B759potJn9U-kJQhrn7VwHYuoKW_g1_6bc',
-                    form_token: '-qZNk9WN3HfwYthxAfvClcs3lkGVelcnl9wKKi6UnGQ',
-                    form_id: 'bpm_pay_for_short_request_form'
+                    form_build_id: metroCallParameters.formBuildId,
+                    form_token: metroCallParameters.formToken,
+                    form_id: metroCallParameters.formId
                 }
             };
 
@@ -825,7 +833,7 @@ export default class MetroClient {
      * Parses the html response and extracts the FormId and FormBuildId
      * @param response
      */
-    private extractFormBuildIdFromResponse(response: any): { formBuildId: string, formId: string } {
+    private extractFormBuildIdFromResponse(response: any, metroCallParameters: IMetroCallParameters): void {
         const $ = load(response.body);
         const formBuildIdElement = $('input[name="form_build_id"]');
         const formIdElement = $('input[name="form_id"]');
@@ -845,10 +853,8 @@ export default class MetroClient {
         console.log('formBuildId: ', formBuildId);
         console.log('formId: ', formId);
 
-        return {
-            formBuildId,
-            formId
-        };
+        metroCallParameters.formBuildId = formBuildId;
+        metroCallParameters.formId = formId;
     }
 
     /**
@@ -856,7 +862,7 @@ export default class MetroClient {
      * @param response
      * @private
      */
-    private extractFormTokenFromResponse(response: any): string {
+    private extractFormTokenFromResponse(response: any, metroCallParameters: IMetroCallParameters): void {
         const $ = load(response.body);
         const formTokenElement = $('input[name="form_token"]');
         let formToken = '';
@@ -865,7 +871,7 @@ export default class MetroClient {
             const val = formTokenElement.val();
             formToken = val ? val.toString() : '';
         }
-        return formToken
+        metroCallParameters.formToken = formToken;
     }
 
     /**
@@ -873,11 +879,7 @@ export default class MetroClient {
      * @param response
      * @private
      */
-    private extractAcceptAndQuoteSource(response: any): {
-        accept: string,
-        quoteSource: string,
-        quoteSourceValue: string
-    } {
+    private extractAcceptAndQuoteSource(response: any, metroCallParameters: IMetroCallParameters): void {
         const $ = load(response.body);
 
         let acceptValue = '';
@@ -903,7 +905,9 @@ export default class MetroClient {
         console.log('quoteSource Id:', quoteSource);
         console.log('quoteSource Value:', quoteSourceValue);
 
-        return {accept: acceptValue, quoteSource: quoteSource, quoteSourceValue: quoteSourceValue};
+        metroCallParameters.accept = acceptValue;
+        metroCallParameters.quoteSource = quoteSource;
+        metroCallParameters.quoteSourceValue = quoteSourceValue;
     }
 
     /**
