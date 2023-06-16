@@ -9,6 +9,7 @@ export interface IMetroCallParameters {
     accept: string;
     quoteSource: string;
     quoteSourceValue: string;
+    traderId: string;
 }
 
 export class MetroCallParameters implements IMetroCallParameters {
@@ -19,8 +20,10 @@ export class MetroCallParameters implements IMetroCallParameters {
     accept: string = '';
     quoteSource: string = '';
     quoteSourceValue: string = '';
+    traderId: string = '';
 
-    constructor(formBuildId?: string, formId?: string, formToken?: string, authLocation?: string, accept?: string, quoteSource?: string, quoteSourceValue?: string) {
+
+    constructor(formBuildId?: string, formId?: string, formToken?: string, authLocation?: string, accept?: string, quoteSource?: string, quoteSourceValue?: string, traderId?: string) {
         if (formBuildId) this.formBuildId = formBuildId;
         if (formId) this.formId = formId;
         if (formToken) this.formToken = formToken;
@@ -28,6 +31,7 @@ export class MetroCallParameters implements IMetroCallParameters {
         if (accept) this.accept = accept;
         if (quoteSource) this.quoteSource = quoteSource;
         if (quoteSourceValue) this.quoteSourceValue = quoteSourceValue;
+        if (traderId) this.traderId = traderId;
     }
 
 }

@@ -9,11 +9,10 @@ import {IContextData} from "./interfaces/context-data.interface.js";
 import {IServerStatus} from "./interfaces/server-status.interface.js";
 import {ILoginResultInterface} from "./interfaces/login-result.interface.js";
 import {IMetroCallParameters, MetroCallParameters} from "./interfaces/metro-call-parameters.interface.js";
+import {IMetroUser} from "./interfaces/metro-user.interface.js";
 
 export default class MetroClient {
     private context: Context;
-
-    private metroUserId: string = '79125005';
 
     private cookies: string[] = ['has_js=1'];
 
@@ -23,36 +22,7 @@ export default class MetroClient {
     private readonly email: string = 'annahuix@yahoo.es';
     private readonly pass: string = 'Ve1oWD9r2ZS6ny';
 
-    // // Access metro
-    // private formBuildIdAccessMetro: string = '';
-    // private formIdAccessMetro: string = '';
-    // // Login
-    // private formBuildIdLogin: string = '';
-    // private formIdLogin: string = '';
-    // // 2FA: mail
-    // private formId2FAMail: string = '';
-    // private formBuildId2FAMail: string = '';
-    //
-    //
-    // // TODO: these have to be set at session level
-    // // Create short request #1
-    // private formBuildIdShortRequest: string = '';
-    // private formIdShortRequest: string = '';
-    // private formTokenShortRequest: string = '';
-    // // Create short request #2 - Submit office
-    // private formBuildIdShortOfficeRequest: string = '';
-    // private formIdShortOfficeRequest: string = '';
-    // private formTokenShortOfficeRequest: string = '';
-    // // Create short request #3 - Submit ticker and quantity
-    // private formBuildIdShortTickerRequest: string = '';
-    // private formIdShortTickerRequest: string = '';
-    // private formTokenShortTickerRequest: string = '';
-    // private acceptValueShortTickerRequest: string = '';
-    // private quoteSourceShortTickerRequest: string = '';
-    // private quoteSourceShortTickerValueRequest: string = '';
-
-
-    // User input readline
+    // User input readline - to enter PIN Code on server startup
     private rl;
     // User logged in indicator
     private userLoggedIn: boolean = false;
@@ -111,10 +81,14 @@ export default class MetroClient {
             const metroDataShortRequest: IMetroCallParameters = await this.getIdsForShortRequest();
 
             console.log('createShortRequestWithOffice');
-            const metroDataShortRequestWithOfficeId: IMetroCallParameters = await this.createShortRequestWithOffice(metroDataShortRequest);
+            const metroDataShortRequestWithOfficeId: IMetroCallParameters = await this.createShortRequestWithOffice(trader, metroDataShortRequest);
+
 
             console.log('createTickerShortRequest');
-            const shortPriceContextResult: IShortPriceWithContext = await this.createTickerShortRequest(trader, symbol, quantity, metroDataShortRequestWithOfficeId);
+            const metroDataTickerShortRequest: IMetroCallParameters = await this.createTickerShortRequest(symbol, quantity, metroDataShortRequestWithOfficeId);
+
+            console.log('createTickerShortRequest');
+            const shortPriceContextResult: IShortPriceWithContext = await this.acceptSelection(metroDataTickerShortRequest);
 
             // Store the context for the confirmation of the purchase in another request
             this.context.store(trader, {
@@ -141,7 +115,7 @@ export default class MetroClient {
             const userContext: IContextData | null = await this.context.get(trader);
             if (!!userContext) {
                 console.log(`Confirm shorts for ${trader}`);
-                // await this.confirmShortsRequest(userContext.formId, userContext.formBuildId, userContext.formToken);
+                const isLocatesPurchaseSuccessful: boolean = await this.confirmSelection(userContext.contextForShortConfirm);
             } else {
                 console.log(`No context for ${trader}, the confirm shorts request will be skipped`);
             }
@@ -644,7 +618,7 @@ export default class MetroClient {
      * Submits the office id, the aim is to get a form ids for the shorts request
      * @private
      */
-    private async createShortRequestWithOffice(metroCallParameters: IMetroCallParameters): Promise<IMetroCallParameters> {
+    private async createShortRequestWithOffice(trader: string, metroCallParameters: IMetroCallParameters): Promise<IMetroCallParameters> {
         try {
 
             const postData = {
@@ -682,6 +656,13 @@ export default class MetroClient {
                 // Get the form id's for to submit of the createRequestWithOfficeId
                 this.extractFormBuildIdFromResponse(response, outputMetroCallParameters);
                 this.extractFormTokenFromResponse(response, outputMetroCallParameters);
+
+                const traderId = this.extractUsersNameAndId(response).find((t) => t.name === trader);
+                if (!traderId) {
+                    throw new Error('No trader found with name: ' + trader);
+                } else {
+                    outputMetroCallParameters.traderId = traderId.id;
+                }
             }
             return outputMetroCallParameters;
         } catch (error) {
@@ -696,11 +677,11 @@ export default class MetroClient {
      * Sets ids (formId, formBuilderId, formToken, acceptValue and quoteSource)
      * @private
      */
-    private async createTickerShortRequest(trader: string, ticker: string, quantity: string, metroCallParameters: IMetroCallParameters): Promise<IShortPriceWithContext> {
+    private async createTickerShortRequest(ticker: string, quantity: string, metroCallParameters: IMetroCallParameters): Promise<IMetroCallParameters> {
         try {
             const postData = {
                 'office_dropdown': this.officeValue,
-                'trader[]': [this.metroUserId],
+                'trader[]': [metroCallParameters.traderId],
                 'symbol[]': [ticker],
                 'num_of_shares[]': [quantity],
                 'op': 'Submit',
@@ -728,20 +709,11 @@ export default class MetroClient {
 
             if (response.statusCode === 200) {
                 // Get the form id's for submitting the createRequestWithOfficeId
-                let responseFormIds: { formId: string; formBuildId: string };
                 this.extractFormBuildIdFromResponse(response, outputMetroCallParameters);
-                ;
                 this.extractFormTokenFromResponse(response, outputMetroCallParameters);
                 this.extractAcceptAndQuoteSource(response, outputMetroCallParameters);
-                const priceAndTotalCost: {
-                    totalCost: string,
-                    pricePerShare: string
-                } = this.extractPriceAndTotalCost(response);
-                return {
-                    totalCost: priceAndTotalCost.totalCost,
-                    pricePerShare: priceAndTotalCost.pricePerShare,
-                    metroCallParameters: outputMetroCallParameters
-                } as IShortPriceWithContext;
+
+                return outputMetroCallParameters;
             }
             throw new Error('Was not possible to get the locates pricing');
         } catch (error) {
@@ -754,13 +726,16 @@ export default class MetroClient {
      * #4 call for the short request process - it will trigger the countdown
      * @private
      */
-    private async acceptSelection(metroCallParameters: IMetroCallParameters): Promise<void> {
+    private async acceptSelection(metroCallParameters: IMetroCallParameters): Promise<IShortPriceWithContext> {
         try {
+            const acceptAttributeName = `accept[${metroCallParameters.quoteSource}]`;
+            const quoteSourceAttributeName = `quote_source[${metroCallParameters.quoteSource}]`;
+
             const postData = {
                 mimeType: 'application/x-www-form-urlencoded',
                 formData: {
-                    accept: '1',
-                    quote_source: metroCallParameters.quoteSource,
+                    [acceptAttributeName]: '1',
+                    [quoteSourceAttributeName]: metroCallParameters.quoteSourceValue,
                     op: 'Submit',
                     form_build_id: metroCallParameters.formBuildId,
                     form_token: metroCallParameters.formToken,
@@ -781,6 +756,29 @@ export default class MetroClient {
                 body: formData,
                 headers
             });
+
+            let outputMetroCallParameters: IMetroCallParameters = new MetroCallParameters();
+            this.debugMode(response, 'createTickerShortRequest');
+
+            if (response.statusCode === 200) {
+                const priceAndTotalCost: {
+                    totalCost: string,
+                    pricePerShare: string
+                } = this.extractPriceAndTotalCost(response);
+
+                // Get the form id's for submitting the createRequestWithOfficeId
+                this.extractFormBuildIdFromResponse(response, outputMetroCallParameters);
+                ;
+                this.extractFormTokenFromResponse(response, outputMetroCallParameters);
+                this.extractAcceptAndQuoteSource(response, outputMetroCallParameters);
+
+                return {
+                    totalCost: priceAndTotalCost.totalCost,
+                    pricePerShare: priceAndTotalCost.pricePerShare,
+                    metroCallParameters: outputMetroCallParameters
+                } as IShortPriceWithContext;
+            }
+
             this.debugMode(response, 'acceptSelection');
             // Handle the response as needed
         } catch (error) {
@@ -789,20 +787,15 @@ export default class MetroClient {
         }
     }
 
-
-    /*************************************************************************************************
-     ********************************************* UTILS *********************************************
-     *************************************************************************************************/
-
-    private async confirmSelection(): Promise<void> {
+    private async confirmSelection(metroCallParameters: IMetroCallParameters): Promise<boolean> {
         try {
             const postData = {
                 mimeType: 'application/x-www-form-urlencoded',
                 formData: {
                     confirm: '1',
-                    form_build_id: 'form-OFtnDkzcoJkyH2Vn05ngHqFhoDLiPF-Zon0w3WrACKw',
-                    form_token: '-qZNk9WN3HfwYthxAfvClcs3lkGVelcnl9wKKi6UnGQ',
-                    form_id: 'bpm_pay_for_short_request_form',
+                    form_build_id: metroCallParameters.formBuildId,
+                    form_token: metroCallParameters.formToken,
+                    form_id: metroCallParameters.formId,
                     op: 'Confirm'
                 }
             };
@@ -821,13 +814,21 @@ export default class MetroClient {
                 headers
             });
             this.debugMode(response, 'confirmSelection');
-
             // Handle the response as needed
+            if (response.statusCode === 200) {
+                return this.extractConfirmPurchaseStatus(response);
+            }
+            return false;
         } catch (error) {
             this.handleCallError(error, 'confirmSelection');
             throw error;
         }
     }
+
+    /*************************************************************************************************
+     ********************************************* UTILS *********************************************
+     *************************************************************************************************/
+
 
     /**
      * Parses the html response and extracts the FormId and FormBuildId
@@ -849,10 +850,6 @@ export default class MetroClient {
             const val = formIdElement.val();
             formId = val ? val.toString() : '';
         }
-
-        console.log('formBuildId: ', formBuildId);
-        console.log('formId: ', formId);
-
         metroCallParameters.formBuildId = formBuildId;
         metroCallParameters.formId = formId;
     }
@@ -900,15 +897,33 @@ export default class MetroClient {
                 acceptValue = name.split('[')[1].split(']')[0];
             }
         });
-
-        console.log('accept Id:', acceptValue);
-        console.log('quoteSource Id:', quoteSource);
-        console.log('quoteSource Value:', quoteSourceValue);
-
         metroCallParameters.accept = acceptValue;
         metroCallParameters.quoteSource = quoteSource;
         metroCallParameters.quoteSourceValue = quoteSourceValue;
     }
+
+
+    /**
+     * Extract the accept and qoute_source values for the accept shorts request
+     * @param response
+     * @private
+     */
+    private extractConfirmPurchaseStatus(response: any): boolean {
+        const $ = load(response.body);
+        let acceptedValue = false;
+
+        $('table.sticky-enabled tbody tr').each(function (i, elem) {
+            const status = $(this).find('td').eq(10).text().trim(); // Index is 0-based
+
+            if (status === 'Accepted') {
+                acceptedValue = true;
+                return false; // Exit the loop once the Accepted value is found
+            }
+        });
+
+        return acceptedValue;
+    }
+
 
     /**
      * Extract the total cost (7 row in table)
@@ -926,6 +941,27 @@ export default class MetroClient {
         console.log('Total Cost:', totalCost);
         console.log('Price per share:', pricePerShare);
         return {totalCost, pricePerShare};
+    }
+
+    private extractUsersNameAndId(response: any): IMetroUser[] {
+
+        const $ = load(response.body);
+        const users: IMetroUser[] = [];
+
+        const options = $('select[name="trader[]"] option');
+
+        options.map(function (i, elem) {
+            const selectedValue = $(this).val().toString();
+
+            if (selectedValue !== '_none') {
+                const name = $(this).text().split(' - ')[0];
+                const id = selectedValue;
+                users.push({name, id});
+            }
+        });
+
+        console.log('users:', users);
+        return users;
     }
 
     /**
