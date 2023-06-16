@@ -49,12 +49,14 @@ export default class HttpServer {
         });
 
         // Route handler for the buy endpoint
-        this.app.get('/confirmShorts', async (req: Request, res: Response) => {
+        this.app.post('/confirmShorts', async (req: Request, res: Response) => {
             try {
+                const trader: string = req.body.trader as string;
+
                 console.log('CONFIRM request received');
 
                 console.log('Calling MetroClient - confirmShortsorder');
-                const price = await this.metroClient.confirmShortsOrder('JOAN');
+                const price = await this.metroClient.confirmShortsOrder(trader);
 
                 // Send the price in the response
                 res.json(price);
