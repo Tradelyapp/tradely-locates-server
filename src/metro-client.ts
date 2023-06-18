@@ -10,9 +10,15 @@ import {IServerStatus} from "./interfaces/server-status.interface.js";
 import {ILoginResultInterface} from "./interfaces/login-result.interface.js";
 import {IMetroCallParameters, MetroCallParameters} from "./interfaces/metro-call-parameters.interface.js";
 import {IMetroUser} from "./interfaces/metro-user.interface.js";
+import {LocatesRegisterController} from "./locates-register.controller.js";
+import {IPurchasedLocate} from "./interfaces/purchased-locate.interfaces.js";
 
 export default class MetroClient {
+    // Sessions cotnext
     private context: Context;
+
+    // Purchased locates registry
+    private locatesRegistry: LocatesRegisterController;
 
     private cookies: string[] = ['has_js=1'];
 
@@ -35,12 +41,14 @@ export default class MetroClient {
     // Will log the HTML response on each request
     private logHTMLResponse: boolean = false;
 
+
     constructor() {
         this.rl = readline.createInterface({
             input: process.stdin,
             output: process.stdout
         });
         this.context = new Context();
+        this.locatesRegistry = new LocatesRegisterController();
     }
 
     /**
@@ -115,7 +123,7 @@ export default class MetroClient {
             const userContext: IContextData | null = await this.context.get(trader);
             if (!!userContext) {
                 console.log(`Confirm shorts for ${trader}`);
-                const isLocatesPurchaseSuccessful: boolean = await this.confirmSelection(userContext.contextForShortConfirm);
+                const isLocatesPurchaseSuccessful: boolean = await this.confirmSelection(trader, userContext.contextForShortConfirm);
             } else {
                 console.log(`No context for ${trader}, the confirm shorts request will be skipped`);
             }
@@ -279,6 +287,16 @@ export default class MetroClient {
     }
 
     /**
+     * Returns a list of purchased locates
+     */
+    public async getPurchasedLocates(trader: string): Promise<IPurchasedLocate[]> {
+        this.locatesRegistry.addLocate(trader, 'AMD.NQ', 2.4, 100, new Date());
+        this.locatesRegistry.addLocate(trader, 'AMD.NQ', 3.4, 200, new Date());
+        this.locatesRegistry.addLocate(trader, 'TSLA.NQ', 0.5, 300, new Date());
+        return this.locatesRegistry.getLocates(trader);
+    }
+
+    /**
      * Ask user in terminal to input the 2FA code
      * @private
      */
@@ -310,7 +328,6 @@ export default class MetroClient {
         });
         return await Promise.race([accessMetroPromise, timeoutPromise]);
     }
-
 
     /**
      * Access metro - get the formId and set has_js cookie
@@ -787,7 +804,8 @@ export default class MetroClient {
         }
     }
 
-    private async confirmSelection(metroCallParameters: IMetroCallParameters): Promise<boolean> {
+
+    private async confirmSelection(trader: string, metroCallParameters: IMetroCallParameters): Promise<boolean> {
         try {
             const postData = {
                 mimeType: 'application/x-www-form-urlencoded',
@@ -813,10 +831,20 @@ export default class MetroClient {
                 body: formData,
                 headers
             });
+
             this.debugMode(response, 'confirmSelection');
             // Handle the response as needed
             if (response.statusCode === 200) {
-                return this.extractConfirmPurchaseStatus(response);
+                const confirmPurchaseStatus: boolean = this.extractConfirmPurchaseStatus(response);
+                if (confirmPurchaseStatus) {
+                    // Add purchase to registry
+                    const ticker = 'AMD.NY';
+                    const price = 10;
+                    const amount = 100;
+                    this.locatesRegistry.addLocate(trader, ticker, price, amount, new Date());
+                }
+
+                return confirmPurchaseStatus;
             }
             return false;
         } catch (error) {
@@ -828,7 +856,6 @@ export default class MetroClient {
     /*************************************************************************************************
      ********************************************* UTILS *********************************************
      *************************************************************************************************/
-
 
     /**
      * Parses the html response and extracts the FormId and FormBuildId
@@ -902,7 +929,6 @@ export default class MetroClient {
         metroCallParameters.quoteSourceValue = quoteSourceValue;
     }
 
-
     /**
      * Extract the accept and qoute_source values for the accept shorts request
      * @param response
@@ -923,7 +949,6 @@ export default class MetroClient {
 
         return acceptedValue;
     }
-
 
     /**
      * Extract the total cost (7 row in table)
