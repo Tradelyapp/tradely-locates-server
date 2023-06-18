@@ -1,5 +1,6 @@
 import express, {Request, Response} from 'express';
 import MetroClient from "./metro-client.js";
+import {IShortPrice} from "./interfaces/short-result.interface.js";
 
 export default class HttpServer {
     app = express();
@@ -30,7 +31,8 @@ export default class HttpServer {
                 console.log(`Received buy request: ticker = ${ticker}, amount = ${amount}`);
 
                 console.log('Calling MetroClient - getShort');
-                const price = await this.metroClient.getShortsPrice(trader, ticker, amount);
+                // const price: IShortPrice = await this.metroClient.getShortsPrice(trader, ticker, amount);
+                const price: IShortPrice = {totalCost: "0.34", pricePerShare: "0.034"};
 
                 // Send the price in the response
                 res.json(price);
@@ -90,7 +92,7 @@ export default class HttpServer {
         });
 
         // Route handler for the server status endpoint
-        this.app.get('/server', async (req: Request, res: Response) => {
+        this.app.get('/status', async (req: Request, res: Response) => {
             try {
                 console.log('Server status request received');
                 res.json(await this.metroClient.getServerStatus());
@@ -100,6 +102,19 @@ export default class HttpServer {
             }
         });
 
+
+        // Route handler for the purchase history
+        this.app.get('/cart', async (req: Request, res: Response) => {
+            try {
+                const trader: string = req.body.trader as string;
+
+                console.log('Purchased locates historic request received');
+                res.json(await this.metroClient.getPurchasedLocates(trader));
+            } catch (error) {
+                console.error('Error handling purchased locates historic request:', error);
+                res.status(500).send('An error occurred');
+            }
+        });
 
         // Route handler for the main endpoint
         this.app.get('/', async (req, res) => {
