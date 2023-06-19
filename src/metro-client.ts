@@ -34,7 +34,7 @@ export default class MetroClient {
     private userLoggedIn: boolean = false;
     // Office value used to get shorts
     private officeValue: string = '78272187';
-    private users: { metro: string, metroForm: string }[] = [];
+    private users: IMetroUser[] = [];
 
     // Will extract error messages on each request
     private isDebugMode: boolean = true;
@@ -255,7 +255,6 @@ export default class MetroClient {
         try {
             // To know if the CubeX is available and if Metro is available and logged in
             await this.accessMetroWithTimeout(20000);
-
             return {
                 status: 'ok',
                 message: 'Server is running',
@@ -267,7 +266,7 @@ export default class MetroClient {
         } catch (error: any) {
             return {
                 status: 'error',
-                message: 'Error getting server status ' + error.message,
+                message: 'Error getting Metro connection status ' + error.message,
                 cookies: this.cookies,
                 userLoggedIn: this.userLoggedIn,
                 officeValue: this.officeValue,
@@ -290,11 +289,22 @@ export default class MetroClient {
      * Returns a list of purchased locates
      */
     public async getPurchasedLocates(trader: string): Promise<IPurchasedLocate[]> {
-        this.locatesRegistry.addLocate(trader, 'AMD.NQ', 2.4, 100, new Date());
-        this.locatesRegistry.addLocate(trader, 'AMD.NQ', 3.4, 200, new Date());
-        this.locatesRegistry.addLocate(trader, 'TSLA.NQ', 0.5, 300, new Date());
+        this.locatesRegistry.addLocate(trader, 'NVDA.NQ', 2.4, 700, new Date());
+        this.locatesRegistry.addLocate(trader, 'CVNA.NY', 0.4, 300, new Date());
+        this.locatesRegistry.addLocate(trader, 'COIN.NQ', 1.5, 400, new Date());
         return this.locatesRegistry.getLocates(trader);
     }
+
+    /**
+     * Returns a list of purchased locates
+     */
+    public async getOfficePurchasedLocates(): Promise<Record<string, IPurchasedLocate[]>> {
+        this.locatesRegistry.addLocate('ADAMFEL', 'AMD.NQ', 2.4, 100, new Date());
+        this.locatesRegistry.addLocate('ALEJMARC', 'AMD.NQ', 3.4, 200, new Date());
+        this.locatesRegistry.addLocate('ADAMFEL', 'TSLA.NQ', 0.5, 300, new Date());
+        return this.locatesRegistry.getAllLocates();
+    }
+
 
     /**
      * Ask user in terminal to input the 2FA code
@@ -674,7 +684,8 @@ export default class MetroClient {
                 this.extractFormBuildIdFromResponse(response, outputMetroCallParameters);
                 this.extractFormTokenFromResponse(response, outputMetroCallParameters);
 
-                const traderId = this.extractUsersNameAndId(response).find((t) => t.name === trader);
+                this.users = this.extractUsersNameAndId(response);
+                const traderId = this.users.find((t) => t.name === trader);
                 if (!traderId) {
                     throw new Error('No trader found with name: ' + trader);
                 } else {
