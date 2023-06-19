@@ -59,6 +59,26 @@ export class LocatesRegisterController {
         }
     }
 
+
+    /**
+     * Get all purchased locates of the office
+     * @param user
+     * @returns {IPurchasedLocate[]}
+     */
+    getAllLocates(): Record<string, IPurchasedLocate[]> {
+        if (this.locatesRegister) {
+            // Convert the map to a JSON serializable object
+            const userLocatesRecord: Record<string, IPurchasedLocate[]> = {};
+            this.locatesRegister.userMap.forEach((value, key) => {
+                userLocatesRecord[key] = value;
+            });
+
+            return userLocatesRecord;
+        } else {
+            return null;
+        }
+    }
+
     private isSameDay(date1: Date, date2: Date): boolean {
         return (
             date1.getFullYear() === date2.getFullYear() &&
