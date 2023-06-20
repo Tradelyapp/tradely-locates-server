@@ -1,10 +1,13 @@
 import express, {Request, Response} from 'express';
 import MetroClient from "./metro-client.js";
-import {IShortPrice} from "./interfaces/short-result.interface.js";
 
 export default class HttpServer {
     app = express();
     metroClient: MetroClient;
+    timeoutId: NodeJS.Timeout | null = null;
+    TIMEOUT_DURATION = 15000; // 20 seconds in milliseconds
+    requestQueue: Array<() => Promise<void>> = [];
+
     private port: number = 3000;
 
     constructor(metroClient: MetroClient) {
@@ -20,9 +23,42 @@ export default class HttpServer {
         });
 
         // Route handler for the buy endpoint
-        this.app.get('/buyShorts', async (req: Request, res: Response) => {
+        // this.app.get('/buyShorts', async (req: Request, res: Response) => {
+        //     try {
+        //         console.log('BUY request received');
+        //         // Parse the ticker and amount parameters
+        //         const trader: string = req.query.trader as string;
+        //         const ticker: string = req.query.ticker as string;
+        //         const amount: string = req.query.amount as string;
+        //
+        //         console.log(`Received buy request: ticker = ${ticker}, amount = ${amount}`);
+        //
+        //         console.log('Calling MetroClient - getShort');
+        //         const price: IShortPrice = await this.metroClient.getShortsPrice(trader, ticker, amount);
+        //
+        //         // Send the price in the response
+        //         res.json(price);
+        //     } catch (error: any) {
+        //         // Check if error message contains 'Can not access Metro'
+        //         if (error.message.includes('not logged in')) {
+        //             console.error('Error message: 401', error.message);
+        //             // Not logged in
+        //             res.status(401).json({error: error.message}); // Send error as JSON
+        //         } else {
+        //             console.error('Error message: 500');
+        //             // All logged errors
+        //             res.status(500).json({error: error.message}); // Send error as JSON
+        //         }
+        //     }
+        // });
+
+
+        // Create a queue to store the requests
+
+        // Function to process the request
+        const processBuyRequest = async (req: Request, res: Response) => {
             try {
-                console.log('BUY request received');
+                console.log(`Processing the request to the queue ${req.query.trader} ${req.query.ticker} ${req.query.amount}`);
                 // Parse the ticker and amount parameters
                 const trader: string = req.query.trader as string;
                 const ticker: string = req.query.ticker as string;
@@ -31,10 +67,40 @@ export default class HttpServer {
                 console.log(`Received buy request: ticker = ${ticker}, amount = ${amount}`);
 
                 console.log('Calling MetroClient - getShort');
-                const price: IShortPrice = await this.metroClient.getShortsPrice(trader, ticker, amount);
+                // const price: IShortPrice = await this.metroClient.getShortsPrice(trader, ticker, amount);
 
-                // Send the price in the response
-                res.json(price);
+                //  TODO: Change this for real call.
+                let price;
+                await setTimeout(() => {
+                    price = {
+                        totalCost: '100',
+                        pricePerShare: '100'
+                    };
+                    console.log('price', price);
+                    // Rest of your code here
+
+                    // Send the price in the response
+                    console.log('Sending the price in the response');
+                    res.json(price);
+                }, 5000);
+
+                // Check if there are pending requests in the queue
+                if (this.requestQueue.length > 0) {
+                    // Set the timeout for confirmShorts
+                    this.timeoutId = setTimeout(() => {
+                        console.log('Timeout reached. Processing next buyShorts request.');
+                        // Execute the next request in the queue
+                        this.requestQueue.shift();
+                        if (this.requestQueue.length > 0) {
+                            const nextRequest = this.requestQueue[0];
+                            if (nextRequest) {
+                                clearTimeout(this.timeoutId);
+                                this.timeoutId = null;
+                                nextRequest();
+                            }
+                        }
+                    }, this.TIMEOUT_DURATION); // Replace TIMEOUT_DURATION with the desired timeout duration in milliseconds
+                }
             } catch (error: any) {
                 // Check if error message contains 'Can not access Metro'
                 if (error.message.includes('not logged in')) {
@@ -47,11 +113,35 @@ export default class HttpServer {
                     res.status(500).json({error: error.message}); // Send error as JSON
                 }
             }
+        };
+
+        // Modify the route to enqueue the requests
+        this.app.get('/buyShorts', (req: Request, res: Response) => {
+            // Enqueue the request
+            this.requestQueue.push(() => processBuyRequest(req, res));
+            console.log('Request queue', this.requestQueue);
+            console.log(`#${this.requestQueue.length} Adding the request to the queue ${req.query.trader} ${req.query.ticker} ${req.query.amount}`);
+
+            // Check if it's the only request in the queue
+            console.log('Queue length: ' + this.requestQueue.length);
+            if (this.requestQueue.length === 1) {
+                // Process the request immediately
+                const currentRequest = this.requestQueue[0];
+                if (currentRequest) {
+                    clearTimeout(this.timeoutId); // Clear the timeout if it exists
+                    this.timeoutId = null;
+                    currentRequest();
+                }
+            }
         });
+
 
         // Route handler for the buy endpoint
         this.app.post('/confirmShorts', async (req: Request, res: Response) => {
             try {
+                clearTimeout(this.timeoutId); // Clear the timeout if it exists
+                this.timeoutId = null;
+
                 const trader: string = req.body.trader as string;
 
                 console.log('CONFIRM request received');
@@ -61,6 +151,15 @@ export default class HttpServer {
 
                 // Send the price in the response
                 res.json(price);
+
+                // Remove the accepted request from the queue and process the next request if any
+                this.requestQueue.shift();
+                if (this.requestQueue.length > 0) {
+                    const nextRequest = this.requestQueue[0];
+                    if (nextRequest) {
+                        nextRequest();
+                    }
+                }
             } catch (error) {
                 console.error('Error handling confirmation buy request:', error);
                 res.status(500).send('Error handling confirmation buy request');
