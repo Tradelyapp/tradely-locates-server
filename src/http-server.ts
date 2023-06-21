@@ -1,12 +1,15 @@
 import express, {Request, Response} from 'express';
 import MetroClient from "./metro-client.js";
+import {IShortPrice} from "./interfaces/short-result.interface.js";
 
 export default class HttpServer {
     app = express();
     metroClient: MetroClient;
     timeoutId: NodeJS.Timeout | null = null;
-    TIMEOUT_DURATION = 15000; // 20 seconds in milliseconds
-    requestQueue: Array<() => Promise<void>> = [];
+    TIMEOUT_DURATION = 25000; // 25 seconds in milliseconds
+    // requestQueue: Array<() => Promise<void>> = [];
+    requestQueue: Array<{ id: number, request: () => Promise<void> }> = [];
+    lastRequestId: number = 0;
 
     private port: number = 3000;
 
@@ -22,41 +25,8 @@ export default class HttpServer {
             next();
         });
 
-        // Route handler for the buy endpoint
-        // this.app.get('/buyShorts', async (req: Request, res: Response) => {
-        //     try {
-        //         console.log('BUY request received');
-        //         // Parse the ticker and amount parameters
-        //         const trader: string = req.query.trader as string;
-        //         const ticker: string = req.query.ticker as string;
-        //         const amount: string = req.query.amount as string;
-        //
-        //         console.log(`Received buy request: ticker = ${ticker}, amount = ${amount}`);
-        //
-        //         console.log('Calling MetroClient - getShort');
-        //         const price: IShortPrice = await this.metroClient.getShortsPrice(trader, ticker, amount);
-        //
-        //         // Send the price in the response
-        //         res.json(price);
-        //     } catch (error: any) {
-        //         // Check if error message contains 'Can not access Metro'
-        //         if (error.message.includes('not logged in')) {
-        //             console.error('Error message: 401', error.message);
-        //             // Not logged in
-        //             res.status(401).json({error: error.message}); // Send error as JSON
-        //         } else {
-        //             console.error('Error message: 500');
-        //             // All logged errors
-        //             res.status(500).json({error: error.message}); // Send error as JSON
-        //         }
-        //     }
-        // });
-
-
-        // Create a queue to store the requests
-
         // Function to process the request
-        const processBuyRequest = async (req: Request, res: Response) => {
+        const processBuyRequest = async (req: Request, res: Response, requestId: any) => {
             try {
                 console.log(`Processing the request to the queue ${req.query.trader} ${req.query.ticker} ${req.query.amount}`);
                 // Parse the ticker and amount parameters
@@ -67,22 +37,20 @@ export default class HttpServer {
                 console.log(`Received buy request: ticker = ${ticker}, amount = ${amount}`);
 
                 console.log('Calling MetroClient - getShort');
-                // const price: IShortPrice = await this.metroClient.getShortsPrice(trader, ticker, amount);
+                const price: IShortPrice = await this.metroClient.getShortsPrice(trader, ticker, amount);
 
-                //  TODO: Change this for real call.
-                let price;
-                await setTimeout(() => {
-                    price = {
-                        totalCost: '100',
-                        pricePerShare: '100'
-                    };
-                    console.log('price', price);
-                    // Rest of your code here
+                //  TODO: Testing purposes only to be removed when queuing testing is done
+                // let price;
+                // await new Promise((resolve) => setTimeout(resolve, 3000)).then(() => {
+                //     console.log('INSIDE TIMEOUT handling BUY request');
+                //
+                //     price = {
+                //         totalCost: '100',
+                //         pricePerShare: '100'
+                //     };
+                // });
 
-                    // Send the price in the response
-                    console.log('Sending the price in the response');
-                    res.json(price);
-                }, 5000);
+                res.json({requestId, price});
 
                 // Check if there are pending requests in the queue
                 if (this.requestQueue.length > 0) {
@@ -90,15 +58,7 @@ export default class HttpServer {
                     this.timeoutId = setTimeout(() => {
                         console.log('Timeout reached. Processing next buyShorts request.');
                         // Execute the next request in the queue
-                        this.requestQueue.shift();
-                        if (this.requestQueue.length > 0) {
-                            const nextRequest = this.requestQueue[0];
-                            if (nextRequest) {
-                                clearTimeout(this.timeoutId);
-                                this.timeoutId = null;
-                                nextRequest();
-                            }
-                        }
+                        this.manageRequestQueue(requestId);
                     }, this.TIMEOUT_DURATION); // Replace TIMEOUT_DURATION with the desired timeout duration in milliseconds
                 }
             } catch (error: any) {
@@ -117,9 +77,12 @@ export default class HttpServer {
 
         // Modify the route to enqueue the requests
         this.app.get('/buyShorts', (req: Request, res: Response) => {
+            console.log(`Received request: ${req.method} ${req.url}`);
+            const requestId = ++this.lastRequestId;
+
             // Enqueue the request
-            this.requestQueue.push(() => processBuyRequest(req, res));
-            console.log('Request queue', this.requestQueue);
+            this.requestQueue.push({id: requestId, request: () => processBuyRequest(req, res, requestId)});
+
             console.log(`#${this.requestQueue.length} Adding the request to the queue ${req.query.trader} ${req.query.ticker} ${req.query.amount}`);
 
             // Check if it's the only request in the queue
@@ -130,39 +93,48 @@ export default class HttpServer {
                 if (currentRequest) {
                     clearTimeout(this.timeoutId); // Clear the timeout if it exists
                     this.timeoutId = null;
-                    currentRequest();
+                    currentRequest.request();
                 }
             }
         });
 
-
-        // Route handler for the buy endpoint
         this.app.post('/confirmShorts', async (req: Request, res: Response) => {
+            const requestId = req.body.requestId as number;
+            console.log(`CONFIRM request ${requestId} received`);
             try {
                 clearTimeout(this.timeoutId); // Clear the timeout if it exists
                 this.timeoutId = null;
 
-                const trader: string = req.body.trader as string;
-
-                console.log('CONFIRM request received');
-
-                console.log('Calling MetroClient - confirmShortsorder');
-                const price = await this.metroClient.confirmShortsOrder(trader);
-
+                // Simulating the delay from this.metroClient.confirmShortsOrder(trader)
+                let price;
+                await new Promise((resolve) => setTimeout(resolve, 5000)).then(() => {
+                    price = {
+                        totalCost: '100',
+                        pricePerShare: '100'
+                    };
+                });
                 // Send the price in the response
                 res.json(price);
-
-                // Remove the accepted request from the queue and process the next request if any
-                this.requestQueue.shift();
-                if (this.requestQueue.length > 0) {
-                    const nextRequest = this.requestQueue[0];
-                    if (nextRequest) {
-                        nextRequest();
-                    }
-                }
             } catch (error) {
                 console.error('Error handling confirmation buy request:', error);
                 res.status(500).send('Error handling confirmation buy request');
+            } finally {
+                // Remove the current request from the queue and execute the next one
+                this.manageRequestQueue(requestId);
+            }
+        });
+
+        this.app.post('/cancelShorts', async (req: Request, res: Response) => {
+            const requestId = req.body.requestId as number;
+            console.log('CANCEL request received');
+            try {
+                res.send('Shorts order canceled successfully');
+            } catch (error) {
+                console.error('Error handling cancel shorts request:', error);
+                res.status(500).send('Error handling cancel shorts request');
+            } finally {
+                // Remove the current request from the queue and execute the next one
+                this.manageRequestQueue(requestId);
             }
         });
 
@@ -200,7 +172,6 @@ export default class HttpServer {
             }
         });
 
-
         // Route handler for the purchase history
         this.app.get('/cart', async (req: Request, res: Response) => {
             try {
@@ -213,7 +184,6 @@ export default class HttpServer {
                 res.status(500).send('An error occurred');
             }
         });
-
 
         // Route handler for the purchase history
         this.app.get('/cartAll', async (req: Request, res: Response) => {
@@ -239,5 +209,32 @@ export default class HttpServer {
         this.app.listen(this.port, () => {
             console.log(`Express server listening on port: ${this.port}`);
         });
+    }
+
+    /**
+     * The requests have to be queued because DTTW only supports one request at a time
+     * When a request is timed out / cancelled or completed the request will be removed from the queue
+     * and the next request, if any, will be executed
+     * @param requestId
+     * @private
+     */
+
+    private manageRequestQueue(requestId: number): void {
+        // Remove the current request from the queue
+        const index = this.requestQueue.findIndex((queuedRequest) => queuedRequest.id === requestId);
+        if (index !== -1) {
+            this.requestQueue.splice(index, 1);
+        }
+
+        // Execute the next request if any
+        if (this.requestQueue.length > 0) {
+            const nextRequest = this.requestQueue[0];
+            if (nextRequest) {
+                console.log('Executing NEXT request ' + nextRequest.id);
+                nextRequest.request();
+            }
+        } else {
+            console.log('No more requests in the queue.');
+        }
     }
 }
