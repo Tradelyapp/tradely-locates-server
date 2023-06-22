@@ -1,14 +1,18 @@
 import express, {Request, Response} from 'express';
 import MetroClient from "./metro-client.js";
 import {IShortPrice} from "./interfaces/short-result.interface.js";
+import {IQueueItem, IQueueReportItem} from "./interfaces/queue-item.interface.js";
+import {IServerStatus} from "./interfaces/server-status.interface.js";
 
 export default class HttpServer {
     app = express();
     metroClient: MetroClient;
     timeoutId: NodeJS.Timeout | null = null;
+
+    /** Time the executed and in pending status is blocking the rest of the requests until it is removed */
     TIMEOUT_DURATION = 25000; // 25 seconds in milliseconds
-    // requestQueue: Array<() => Promise<void>> = [];
-    requestQueue: Array<{ id: number, request: () => Promise<void> }> = [];
+    /** Queue with all the buy shorts requests */
+    requestQueue: Array<IQueueItem> = [];
     lastRequestId: number = 0;
 
     private port: number = 3000;
@@ -84,11 +88,18 @@ export default class HttpServer {
         this.app.get('/buyShorts', (req: Request, res: Response) => {
             console.log(`Received buyShorts request: ${req.method} ${req.url}`);
             const requestId = ++this.lastRequestId;
+            const trader: string = req.query.trader as string;
+            const ticker: string = req.query.ticker as string;
+            const amount: string = req.query.amount as string;
 
             // Enqueue the request
-            this.requestQueue.push({id: requestId, request: () => processBuyRequest(req, res, requestId)});
+            this.requestQueue.push({
+                id: requestId,
+                meta: {trader: trader, ticker: ticker, amount: amount},
+                request: () => processBuyRequest(req, res, requestId)
+            });
 
-            console.log(`#${this.requestQueue.length} Adding the request to the queue ${req.query.trader} ${req.query.ticker} ${req.query.amount}`);
+            console.log(`#${this.requestQueue.length} Adding the request to the queue ${trader} ${ticker} ${amount}`);
 
             // Check if it's the only request in the queue
             console.log('Queue length: ' + this.requestQueue.length);
@@ -182,7 +193,10 @@ export default class HttpServer {
         this.app.get('/status', async (req: Request, res: Response) => {
             try {
                 console.log('Server status request received');
-                res.json(await this.metroClient.getServerStatus());
+                const queueReport: IQueueReportItem[] = this.getPendingRequests();
+                let status: IServerStatus = await this.metroClient.getServerStatus();
+                status.requests = queueReport;
+                res.json(status);
             } catch (error) {
                 console.error('Error handling buy request:', error);
                 res.status(500).send('An error occurred');
@@ -258,5 +272,21 @@ export default class HttpServer {
             console.log('No more requests in the queue.');
         }
         return requestRemovedFromQueue;
+    }
+
+
+    /**
+     * Transform the request to format IQueueItem[]
+     * @private
+     */
+    private getPendingRequests(): IQueueReportItem[] {
+        return this.requestQueue.map(item => {
+            return {
+                id: item.id, // convert id to string
+                userName: item.meta.trader,
+                ticker: item.meta.ticker,
+                amount: item.meta.amount
+            };
+        })
     }
 }
