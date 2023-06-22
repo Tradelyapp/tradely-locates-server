@@ -289,9 +289,6 @@ export default class MetroClient {
      * Returns a list of purchased locates
      */
     public async getPurchasedLocates(trader: string): Promise<IPurchasedLocate[]> {
-        this.locatesRegistry.addLocate(trader, 'NVDA.NQ', 2.4, 700, new Date());
-        this.locatesRegistry.addLocate(trader, 'CVNA.NY', 0.4, 300, new Date());
-        this.locatesRegistry.addLocate(trader, 'COIN.NQ', 1.5, 400, new Date());
         return this.locatesRegistry.getLocates(trader);
     }
 
@@ -299,9 +296,6 @@ export default class MetroClient {
      * Returns a list of purchased locates
      */
     public async getOfficePurchasedLocates(): Promise<Record<string, IPurchasedLocate[]>> {
-        this.locatesRegistry.addLocate('ADAMFEL', 'AMD.NQ', 2.4, 100, new Date());
-        this.locatesRegistry.addLocate('ALEJMARC', 'AMD.NQ', 3.4, 200, new Date());
-        this.locatesRegistry.addLocate('ADAMFEL', 'TSLA.NQ', 0.5, 300, new Date());
         return this.locatesRegistry.getAllLocates();
     }
 

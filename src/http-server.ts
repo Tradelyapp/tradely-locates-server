@@ -21,7 +21,7 @@ export default class HttpServer {
     public startServer(): void {
         // Middleware to log incoming requests
         this.app.use((req, res, next) => {
-            console.log(`Received request: ${req.method} ${req.url}`);
+            console.log(`#Received request: ${req.method} ${req.url}`);
             next();
         });
 
@@ -50,8 +50,24 @@ export default class HttpServer {
                 //     };
                 // });
 
+                console.log('send response proccessBuyRequest');
                 res.json({requestId, price});
 
+
+            } catch (error: any) {
+                // Check if error message contains 'Can not access Metro'
+                if (error.message.includes('not logged in')) {
+                    console.error('Error message: 401', error.message);
+                    // Not logged in
+                    console.log('send response proccessBuyRequest - status');
+                    res.status(401).json({error: error.message}); // Send error as JSON
+                } else {
+                    console.error('Error message: 500');
+                    // All logged errors
+                    console.log('send response proccessBuyRequest - status');
+                    res.status(500).json({error: error.message}); // Send error as JSON
+                }
+            } finally {
                 // Check if there are pending requests in the queue
                 if (this.requestQueue.length > 0) {
                     // Set the timeout for confirmShorts
@@ -61,23 +77,12 @@ export default class HttpServer {
                         this.manageRequestQueue(requestId);
                     }, this.TIMEOUT_DURATION); // Replace TIMEOUT_DURATION with the desired timeout duration in milliseconds
                 }
-            } catch (error: any) {
-                // Check if error message contains 'Can not access Metro'
-                if (error.message.includes('not logged in')) {
-                    console.error('Error message: 401', error.message);
-                    // Not logged in
-                    res.status(401).json({error: error.message}); // Send error as JSON
-                } else {
-                    console.error('Error message: 500');
-                    // All logged errors
-                    res.status(500).json({error: error.message}); // Send error as JSON
-                }
             }
         };
 
         // Modify the route to enqueue the requests
         this.app.get('/buyShorts', (req: Request, res: Response) => {
-            console.log(`Received request: ${req.method} ${req.url}`);
+            console.log(`Received buyShorts request: ${req.method} ${req.url}`);
             const requestId = ++this.lastRequestId;
 
             // Enqueue the request
@@ -98,6 +103,9 @@ export default class HttpServer {
             }
         });
 
+        /**
+         * Confirm the buy request
+         */
         this.app.post('/confirmShorts', async (req: Request, res: Response) => {
             const requestId = req.body.requestId as number;
             console.log(`CONFIRM request ${requestId} received`);
@@ -105,18 +113,26 @@ export default class HttpServer {
                 clearTimeout(this.timeoutId); // Clear the timeout if it exists
                 this.timeoutId = null;
 
-                // Simulating the delay from this.metroClient.confirmShortsOrder(trader)
-                let price;
-                await new Promise((resolve) => setTimeout(resolve, 5000)).then(() => {
-                    price = {
-                        totalCost: '100',
-                        pricePerShare: '100'
-                    };
-                });
+                // TODO: Remove after testing
+                //  Simulating the delay from this.metroClient.confirmShortsOrder(trader)
+                // let price;
+                // await new Promise((resolve) => setTimeout(resolve, 5000)).then(() => {
+                //     price = {
+                //         totalCost: '100',
+                //         pricePerShare: '100'
+                //     };
+                // });\
+
+                const trader: string = req.body.trader as string;
+                const price = await this.metroClient.confirmShortsOrder(trader);
+
+                //
                 // Send the price in the response
+                console.log('send response confirmShorts');
                 res.json(price);
             } catch (error) {
                 console.error('Error handling confirmation buy request:', error);
+                console.log('send response confirmShorts - status');
                 res.status(500).send('Error handling confirmation buy request');
             } finally {
                 // Remove the current request from the queue and execute the next one
@@ -124,26 +140,27 @@ export default class HttpServer {
             }
         });
 
+        /**
+         * Remove the request from the queue, if there are more requests in the queue then execute the next one
+         */
         this.app.post('/cancelShorts', async (req: Request, res: Response) => {
             const requestId = req.body.requestId as number;
-            console.log('CANCEL request received');
-            try {
+            console.log(`CANCEL request received ${requestId}`);
+            const requestRemovedFromQueue: boolean = this.manageRequestQueue(requestId);
+            if (requestRemovedFromQueue) {
                 res.send('Shorts order canceled successfully');
-            } catch (error) {
-                console.error('Error handling cancel shorts request:', error);
-                res.status(500).send('Error handling cancel shorts request');
-            } finally {
-                // Remove the current request from the queue and execute the next one
-                this.manageRequestQueue(requestId);
+            } else {
+                console.error('CANCEL Request: requestId not found, maybe removed by timeout');
             }
         });
-
 
         // Route handler for restart connection endpoint
         this.app.get('/restart', async (req: Request, res: Response) => {
             try {
                 console.log('Restart request received');
                 res.json(await this.metroClient.handleConnectionWithClientInput2FACode('JOAN'));
+                console.log('Restart request queue');
+                this.requestQueue = [];
             } catch (error) {
                 console.error('Error handling buy request:', error);
                 res.status(500).send('An error occurred');
@@ -219,13 +236,17 @@ export default class HttpServer {
      * @private
      */
 
-    private manageRequestQueue(requestId: number): void {
+    private manageRequestQueue(requestId: number): boolean {
         // Remove the current request from the queue
+        console.log('Removing request with id ', requestId);
         const index = this.requestQueue.findIndex((queuedRequest) => queuedRequest.id === requestId);
+        let requestRemovedFromQueue: boolean = false;
         if (index !== -1) {
             this.requestQueue.splice(index, 1);
+            requestRemovedFromQueue = true;
         }
 
+        console.log('Request queue ids: ', this.requestQueue.map(requestId => requestId.id));
         // Execute the next request if any
         if (this.requestQueue.length > 0) {
             const nextRequest = this.requestQueue[0];
@@ -236,5 +257,6 @@ export default class HttpServer {
         } else {
             console.log('No more requests in the queue.');
         }
+        return requestRemovedFromQueue;
     }
 }
