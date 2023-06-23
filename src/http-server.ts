@@ -3,10 +3,12 @@ import MetroClient from "./metro-client.js";
 import {IShortPrice} from "./interfaces/short-result.interface.js";
 import {IQueueItem, IQueueReportItem} from "./interfaces/queue-item.interface.js";
 import {IServerStatus} from "./interfaces/server-status.interface.js";
+import DttwClient from "./dttw-client.js";
 
 export default class HttpServer {
     app = express();
     metroClient: MetroClient;
+    dttwClient: DttwClient;
     timeoutId: NodeJS.Timeout | null = null;
 
     /** Time the executed and in pending status is blocking the rest of the requests until it is removed */
@@ -20,6 +22,7 @@ export default class HttpServer {
     constructor(metroClient: MetroClient) {
         this.app.use(express.json());
         this.metroClient = metroClient;
+        this.dttwClient = new DttwClient(process.env.DTTW_URL, process.env.DTTW_PORT);
     }
 
     public startServer(): void {
@@ -226,6 +229,52 @@ export default class HttpServer {
                 res.status(500).send('An error occurred');
             }
         });
+
+
+        // Route handler for the open positions of a trader
+        this.app.get('/positions', async (req: Request, res: Response) => {
+            try {
+                console.log('Open positions request received for', req.query.trader);
+                // Extract trader parameter from query
+                const trader = req.query.trader.toString();
+
+                if (!trader) {
+                    return res.status(400).send('Trader parameter is required');
+                }
+
+                // Call getOpenPositions to retrieve open positions for the trader
+                const openPositions = await this.dttwClient.getOpenPositions(trader);
+
+                // Respond with the open positions
+                res.json(openPositions);
+            } catch (error) {
+                console.error('Error handling positions request:', error);
+                res.status(500).send('An error occurred');
+            }
+        });
+
+        // Route handler for flattening the open positions of a trader
+        this.app.get('/flatten', async (req: Request, res: Response) => {
+            try {
+                console.log('Flatten request received for', req.query.trader);
+                // Extract trader parameter from query
+                const trader = req.query.trader.toString();
+
+                if (!trader) {
+                    return res.status(400).send('Trader parameter is required');
+                }
+
+                // Call getOpenPositions to retrieve open positions for the trader
+                await this.dttwClient.flattenTrader(trader);
+
+                // Respond with the open positions
+                res.json(true);
+            } catch (error) {
+                console.error('Error handling positions request:', error);
+                res.status(500).send('An error occurred');
+            }
+        });
+
 
         // Route handler for the main endpoint
         this.app.get('/', async (req, res) => {
