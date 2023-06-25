@@ -15,6 +15,7 @@ export default class HttpServer {
     TIMEOUT_DURATION = 25000; // 25 seconds in milliseconds
     /** Queue with all the buy shorts requests */
     requestQueue: Array<IQueueItem> = [];
+
     lastRequestId: number = 0;
 
     private port: number = 3000;
@@ -86,6 +87,16 @@ export default class HttpServer {
                 }
             }
         };
+
+        // Gets the position of the request in the pending requests queue
+        this.app.get('/buyShortsQueue', (req: Request, res: Response) => {
+            const trader: string = req.query.trader as string;
+            const ticker: string = req.query.ticker as string;
+            const amount: string = req.query.amount as string;
+            let requestPositionInQueue = this.requestQueue.findIndex(requestInQueue => requestInQueue.meta.trader === trader && requestInQueue.meta.ticker === ticker && requestInQueue.meta.amount === amount);
+            requestPositionInQueue = !!requestPositionInQueue ? requestPositionInQueue + 1 : 0;
+            res.json({queuePosition: requestPositionInQueue});
+        });
 
         // Modify the route to enqueue the requests
         this.app.get('/buyShorts', (req: Request, res: Response) => {
