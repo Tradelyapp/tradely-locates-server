@@ -6,9 +6,6 @@
   "scripts": {
     "ts": "tsc -p .",
     "start": "npm run build && node build/src/index.js",
-    "locates": "npm run build && node build/src/locates.js",
-    "telegram": "npm run build && node build/src/bot.js",
-    "server": "npm run build && node build/http-server.js",
     "lint": "tslint -c tslint.json 'src/**/*.ts'",
     "clean": "rimraf ./build",
     "build": "npm run clean && tsc",
