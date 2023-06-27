@@ -25,8 +25,9 @@ export default class MetroClient {
     // If 2FA is needed
     private authLocation: string = '';
 
-    private readonly email: string = 'annahuix@yahoo.es';
-    private readonly pass: string = 'Ve1oWD9r2ZS6ny';
+    private readonly email: string = process.env.DTTW_MANAGER || '';
+    private readonly pass: string = process.env.DTTW_PASS || '';
+
 
     // User input readline - to enter PIN Code on server startup
     private rl;
