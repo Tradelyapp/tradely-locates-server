@@ -10,6 +10,10 @@ const svc = new Service.Service({
     name: 'Tradely Locates',
     description: 'Tradely service to purchase locates on MetroDTTW',
     script: path.join(__dirname, '', 'index.js'),
+    env: [{
+        name: "NODE_ENV",
+        value: 'production'
+    }],
     nodeOptions: '--harmony --max_old_space_size=4096',
 });
 
