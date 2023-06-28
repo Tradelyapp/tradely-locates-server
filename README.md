@@ -85,7 +85,11 @@ To run the Node.js application as a Windows service, you there is the `node-wind
 
    You should see your service listed with its status.
 
+To uninstall the app as a windows service
 
+   ```bash
+   node build/src/windows-service.js uninstall
+   ```
 
 ## License
 
