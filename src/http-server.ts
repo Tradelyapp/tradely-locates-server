@@ -35,10 +35,10 @@ export default class HttpServer {
             next();
         });
 
-        // Middleware to allow requests only from the specified IP
+        // Middleware to allow requests only from the specified IP if one is specified
         this.app.use((req, res, next) => {
             const clientIp = req.ip;
-            if (clientIp !== this.locatesClientIp) {
+            if (!!this.locatesClientIp && clientIp !== this.locatesClientIp) {
                 console.log(`Request from unauthorized IP: ${clientIp}`);
                 res.status(403).send('Forbidden');
             } else {
