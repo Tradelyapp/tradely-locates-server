@@ -10,6 +10,7 @@ export default class HttpServer {
     metroClient: MetroClient;
     dttwClient: DttwClient;
     timeoutId: NodeJS.Timeout | null = null;
+    locatesClientIp: string; // Client IP address
 
     /** Time the executed and in pending status is blocking the rest of the requests until it is removed */
     TIMEOUT_DURATION = 25000; // 25 seconds in milliseconds
@@ -24,6 +25,7 @@ export default class HttpServer {
         this.app.use(express.json());
         this.metroClient = metroClient;
         this.dttwClient = new DttwClient(process.env.DTTW_URL, process.env.DTTW_PORT);
+        this.locatesClientIp = process.env.LOCATES_CLIENT_IP;
     }
 
     public startServer(): void {
@@ -31,6 +33,17 @@ export default class HttpServer {
         this.app.use((req, res, next) => {
             console.log(`#Received request: ${req.method} ${req.url}`);
             next();
+        });
+
+        // Middleware to allow requests only from the specified IP
+        this.app.use((req, res, next) => {
+            const clientIp = req.ip;
+            if (clientIp !== this.locatesClientIp) {
+                console.log(`Request from unauthorized IP: ${clientIp}`);
+                res.status(403).send('Forbidden');
+            } else {
+                next();
+            }
         });
 
         // Function to process the request
