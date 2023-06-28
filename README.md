@@ -44,12 +44,16 @@ The application should now be up and running on the specified port.
 The project includes the following scripts defined in the `package.json` file:
 
 - `ts`: Compiles the TypeScript files.
-- `start`: Builds and runs the application.
+- `start`: Builds and runs the application with production environment.
+- `dev`: Builds and runs the application with development environment.
 - `lint`: Lints the TypeScript files using the TSLint configuration.
 - `clean`: Deletes the `build` directory.
 - `build`: Cleans the project and compiles the TypeScript code.
 - `local`: Runs the application using `ts-node` for local development.
 - `local:watch`: Monitors changes in the source files and restarts the application automatically.
+- 
+
+
 
 Feel free to use these scripts based on your development and deployment requirements.
 
