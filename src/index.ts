@@ -6,9 +6,6 @@ import path from "path";
 /** The aim of this file is to serve as a launcher, it creates the metroClient, launches the httpServer passing the metroClient
  * reference to make the metro actions
  */
-
-
-
 async function initializeMetroClient(): Promise<MetroClient> {
     try {
         console.log('Starting metroClient');
@@ -55,6 +52,8 @@ function loadEnvVariables() {
         throw new Error(`Required environment variables are missing: ${missingVariables.join(', ')}`);
     }
 }
+
+console.log('Starting Locates Server on environment: ' + process.env.NODE_ENV);
 
 // Call the function to load and validate environment variables
 loadEnvVariables();
