@@ -6,7 +6,7 @@
   "scripts": {
     "ts": "tsc -p .",
     "start": "cross-env NODE_ENV=production node build/src/index.js",
-    "dev": "cross-env NODE_ENV=development nodemon build/src/index.js",
+    "dev": "npm run build && cross-env NODE_ENV=development nodemon build/src/index.js",
     "lint": "tslint -c tslint.json 'src/**/*.ts'",
     "clean": "rimraf ./build",
     "build": "npm run clean && tsc",

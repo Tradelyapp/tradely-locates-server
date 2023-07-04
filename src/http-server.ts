@@ -280,7 +280,7 @@ export default class HttpServer {
         });
 
         // Route handler for flattening the open positions of a trader
-        this.app.get('/flatten', async (req: Request, res: Response) => {
+        this.app.post('/flatten', async (req: Request, res: Response) => {
             try {
                 console.log('Flatten request received for', req.query.trader);
                 // Extract trader parameter from query

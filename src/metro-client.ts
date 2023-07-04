@@ -12,9 +12,11 @@ import {IMetroCallParameters, MetroCallParameters} from "./interfaces/metro-call
 import {IMetroUser} from "./interfaces/metro-user.interface.js";
 import {LocatesRegisterController} from "./locates-register.controller.js";
 import {IPurchasedLocate} from "./interfaces/purchased-locate.interfaces.js";
+import {ITransactionParameters} from "./interfaces/transaction-parameters.interface.js";
 
 export default class MetroClient {
-    // Sessions cotnext
+    // Sessions context per user - despite Metro is not multisession here the session is per user, maybe in a future we can
+    // balance requests via multiple manager accounts
     private context: Context;
 
     // Purchased locates registry
@@ -100,12 +102,14 @@ export default class MetroClient {
             const shortPriceContextResult: IShortPriceWithContext = await this.acceptSelection(metroDataTickerShortRequest);
 
             // Store the context for the confirmation of the purchase in another request
+            const shortPrice: IShortPrice = shortPriceContextResult as IShortPrice;
+
             this.context.store(trader, {
                 contextForShortConfirm: shortPriceContextResult.metroCallParameters,
+                transactionParameters: {ticker: symbol, amountShares: quantity, totalCost: shortPrice.totalCost},
                 timestamp: Date.now()
             });
 
-            const shortPrice: IShortPrice = shortPriceContextResult as IShortPrice;
             return shortPrice;
         } catch (error: any) {
             throw new Error(`Error getting shorts: ${error.message}`);
@@ -124,7 +128,7 @@ export default class MetroClient {
             const userContext: IContextData | null = await this.context.get(trader);
             if (!!userContext) {
                 console.log(`Confirm shorts for ${trader}`);
-                const isLocatesPurchaseSuccessful: boolean = await this.confirmSelection(trader, userContext.contextForShortConfirm);
+                const isLocatesPurchaseSuccessful: boolean = await this.confirmSelection(trader, userContext.contextForShortConfirm, userContext.transactionParameters);
             } else {
                 console.log(`No context for ${trader}, the confirm shorts request will be skipped`);
             }
@@ -811,7 +815,7 @@ export default class MetroClient {
     }
 
 
-    private async confirmSelection(trader: string, metroCallParameters: IMetroCallParameters): Promise<boolean> {
+    private async confirmSelection(trader: string, metroCallParameters: IMetroCallParameters, transactionParameters: ITransactionParameters): Promise<boolean> {
         try {
             const postData = {
                 mimeType: 'application/x-www-form-urlencoded',
@@ -844,12 +848,11 @@ export default class MetroClient {
                 const confirmPurchaseStatus: boolean = this.extractConfirmPurchaseStatus(response);
                 if (confirmPurchaseStatus) {
                     // Add purchase to registry
-                    const ticker = 'AMD.NY';
-                    const price = 10;
-                    const amount = 100;
+                    const ticker = transactionParameters.ticker;
+                    const amount = +transactionParameters.amountShares;
+                    const price = +transactionParameters.totalCost;
                     this.locatesRegistry.addLocate(trader, ticker, price, amount, new Date());
                 }
-
                 return confirmPurchaseStatus;
             }
             return false;
