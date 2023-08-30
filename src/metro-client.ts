@@ -257,10 +257,11 @@ export default class MetroClient {
     }
 
     public async getServerStatus(): Promise<IServerStatus> {
+        const cookiesBeforeAccessMetro = [...this.cookies];
         try {
             // To know if the CubeX is available and if Metro is available and logged in
             await this.accessMetroWithTimeout(20000);
-            return {
+            let result: IServerStatus = {
                 status: 'ok',
                 message: 'Server is running',
                 cookies: this.cookies,
@@ -268,6 +269,10 @@ export default class MetroClient {
                 officeValue: this.officeValue,
                 users: this.users
             };
+            if (!this.userLoggedIn) {
+                result.oldCookies = cookiesBeforeAccessMetro;
+            }
+            return result;
         } catch (error: any) {
             return {
                 status: 'error',
