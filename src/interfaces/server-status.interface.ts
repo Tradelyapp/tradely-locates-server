@@ -11,4 +11,12 @@ export interface IServerStatus {
     officeValue: string;
     users: IMetroUser[];
     requests?: IQueueReportItem[];
+    stats?: IStats;
+}
+
+export interface IStats {
+    totalShortPriceRequests: number;
+    totalAcceptedShortRequests: number;
+    shortPriceRequests: number;
+    acceptedShortRequests: number;
 }
