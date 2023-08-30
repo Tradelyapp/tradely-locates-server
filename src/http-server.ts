@@ -11,6 +11,7 @@ export default class HttpServer {
     dttwClient: DttwClient;
     timeoutId: NodeJS.Timeout | null = null;
     locatesClientIp: string; // Client IP address
+    serverStartTime: number;
 
     /** Time the executed and in pending status is blocking the rest of the requests until it is removed */
     TIMEOUT_DURATION = 25000; // 25 seconds in milliseconds
@@ -26,6 +27,7 @@ export default class HttpServer {
         this.metroClient = metroClient;
         this.dttwClient = new DttwClient(process.env.DTTW_URL, process.env.DTTW_PORT);
         this.locatesClientIp = process.env.LOCATES_CLIENT_IP;
+        this.serverStartTime = Date.now();
     }
 
     public startServer(): void {
@@ -153,16 +155,6 @@ export default class HttpServer {
                 clearTimeout(this.timeoutId); // Clear the timeout if it exists
                 this.timeoutId = null;
 
-                // TODO: Remove after testing
-                //  Simulating the delay from this.metroClient.confirmShortsOrder(trader)
-                // let price;
-                // await new Promise((resolve) => setTimeout(resolve, 5000)).then(() => {
-                //     price = {
-                //         totalCost: '100',
-                //         pricePerShare: '100'
-                //     };
-                // });\
-
                 const trader: string = req.body.trader as string;
                 const price = await this.metroClient.confirmShortsOrder(trader);
 
@@ -224,6 +216,7 @@ export default class HttpServer {
                 console.log('Server status request received');
                 const queueReport: IQueueReportItem[] = this.getPendingRequests();
                 let status: IServerStatus = await this.metroClient.getServerStatus();
+                status.startTime = new Date(this.serverStartTime).toString();
                 status.requests = queueReport;
                 res.json(status);
             } catch (error) {
