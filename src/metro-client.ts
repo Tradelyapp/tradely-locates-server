@@ -44,6 +44,12 @@ export default class MetroClient {
     // Will log the HTML response on each request
     private logHTMLResponse: boolean = false;
 
+    // Short requests stats
+    private totalPriceShortRequests: number = 0;
+    private totalAcceptedShortRequests: number = 0;
+    private priceShortRequests: number = 0;
+    private acceptedShortRequests: number = 0;
+
 
     constructor() {
         this.rl = readline.createInterface({
@@ -110,6 +116,10 @@ export default class MetroClient {
                 timestamp: Date.now()
             });
 
+            // Update stats
+            this.priceShortRequests++;
+            this.totalPriceShortRequests++;
+
             return shortPrice;
         } catch (error: any) {
             throw new Error(`Error getting shorts: ${error.message}`);
@@ -128,7 +138,11 @@ export default class MetroClient {
             const userContext: IContextData | null = await this.context.get(trader);
             if (!!userContext) {
                 console.log(`Confirm shorts for ${trader}`);
-                const isLocatesPurchaseSuccessful: boolean = await this.confirmSelection(trader, userContext.contextForShortConfirm, userContext.transactionParameters);
+                await this.confirmSelection(trader, userContext.contextForShortConfirm, userContext.transactionParameters);
+
+                // Update stats
+                this.acceptedShortRequests++;
+                this.totalAcceptedShortRequests++;
             } else {
                 console.log(`No context for ${trader}, the confirm shorts request will be skipped`);
             }
@@ -267,7 +281,13 @@ export default class MetroClient {
                 cookies: this.cookies,
                 userLoggedIn: this.userLoggedIn,
                 officeValue: this.officeValue,
-                users: this.users
+                users: this.users,
+                stats: {
+                    totalAcceptedShortRequests: this.totalAcceptedShortRequests,
+                    totalShortPriceRequests: this.totalPriceShortRequests,
+                    acceptedShortRequests: this.acceptedShortRequests,
+                    shortPriceRequests: this.priceShortRequests
+                }
             };
             if (!this.userLoggedIn) {
                 result.oldCookies = cookiesBeforeAccessMetro;
