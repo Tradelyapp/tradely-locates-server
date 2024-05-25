@@ -1,6 +1,6 @@
-# Tradely Locates Server
+# DTTW / Real Trading Locates Server
 
-This project is a Node.js application that will create a webserver to buy locates from DTTW Firm throughout the Metro Page
+This project is a Node.js application that will create a webserver to buy locates from DTTW / Real Trading Firm throughout the Metro Page
 
 ## Installation
 
